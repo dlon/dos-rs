@@ -1,0 +1,37 @@
+[package]
+name = "dos"
+description = "Rust-friendly bindings for Windows APIs"
+license = "GPL-3.0-only"
+version = "0.0.1"
+edition = "2024"
+
+[features]
+default = ["full"]
+full = ["process", "string", "security", "net"]
+process = [
+    "dep:bitflags",
+    "windows-sys/Win32_System_Diagnostics",
+    "windows-sys/Win32_System_Diagnostics_ToolHelp",
+]
+string = ["windows-sys/Win32_Globalization"]
+security = [
+    "windows-sys/Win32_Security",
+    "windows-sys/Win32_Security_Authorization",
+    "windows-sys/Win32_System_Memory",
+]
+net = [
+    "windows-sys/Win32_NetworkManagement",
+    "windows-sys/Win32_NetworkManagement_IpHelper",
+    "windows-sys/Win32_NetworkManagement_Ndis",
+    "windows-sys/Win32_Networking_WinSock",
+]
+
+[dependencies]
+bitflags = { version = "2.6", optional = true }
+windows-sys = { version = "0.61.0", features = [] }
+
+[dev-dependencies]
+windows-sys = { version = "0.61.0", features = [
+    "Win32_Storage",
+    "Win32_Storage_FileSystem",
+] }
