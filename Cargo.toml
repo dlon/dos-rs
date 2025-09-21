@@ -8,7 +8,7 @@ readme = "README.md"
 
 [features]
 default = ["full"]
-full = ["process", "string", "security", "net"]
+full = ["process", "string", "security", "sys", "net"]
 process = [
     "dep:bitflags",
     "windows-sys/Win32_System_Diagnostics",
@@ -27,6 +27,7 @@ net = [
     "windows-sys/Win32_NetworkManagement_Ndis",
     "windows-sys/Win32_Networking_WinSock",
 ]
+sys = ["windows-sys/Win32_System_SystemInformation"]
 
 [dependencies]
 bitflags = { version = "2.6", optional = true }

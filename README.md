@@ -21,6 +21,7 @@ dos = "0.0.1"
 - `process` - Process and module enumeration
 - `string` - String conversion utilities
 - `security` - Security and access control
+- `sys` - System information
 
 ## Guiding principles
 

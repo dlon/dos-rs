@@ -19,6 +19,7 @@
 //! - `process` - Process and module enumeration
 //! - `string` - String conversion utilities
 //! - `security` - Security and access control
+//! - `sys` - System information
 //!
 //! # Guiding principles
 //!
@@ -144,6 +145,8 @@ pub mod process;
 pub mod security;
 #[cfg(feature = "string")]
 pub mod string;
+#[cfg(feature = "sys")]
+pub mod sys;
 
 #[cfg(any(feature = "process", feature = "string"))]
 mod util;
