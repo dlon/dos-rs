@@ -661,6 +661,55 @@ impl Deref for OwnedSid {
     }
 }
 
+/// Security impersonation levels
+///
+/// These correspond to the `SECURITY_IMPERSONATION_LEVEL` enumeration from the Windows API.
+///
+/// [`SECURITY_IMPERSONATION_LEVEL`]: https://learn.microsoft.com/en-us/windows/win32/api/winnt/ne-winnt-security_impersonation_level
+#[repr(i32)]
+pub enum ImpersonationLevel {
+    /// Anonymous impersonation level
+    Anonymous,
+    /// Identification impersonation level
+    Identification,
+    /// Impersonation impersonation level
+    Impersonation,
+    /// Delegation impersonation level
+    Delegation,
+}
+
+/// Obtain an access token impersonating the security context of the calling process.
+///
+/// This calls the underlying [`ImpersonateSelf`] Windows API function.
+///
+/// [`ImpersonateSelf`]: https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-impersonateself
+pub fn impersonate_self(level: ImpersonationLevel) -> io::Result<()> {
+    use windows_sys::Win32::Security::ImpersonateSelf;
+
+    // SAFETY: The parameters are valid
+    let result = unsafe { ImpersonateSelf(level as i32) };
+    if result == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Terminate impersonation of a client application.
+///
+/// This calls the underlying [`RevertToSelf`] Windows API function.
+///
+/// [`RevertToSelf`]: https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-reverttoself
+pub fn revert_to_self() -> io::Result<()> {
+    use windows_sys::Win32::Security::RevertToSelf;
+
+    // SAFETY: No parameters
+    let result = unsafe { RevertToSelf() };
+    if result == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::os::windows::fs::OpenOptionsExt;
