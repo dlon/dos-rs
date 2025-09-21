@@ -680,10 +680,12 @@ pub fn convert_interface_alias_to_luid<T: AsRef<OsStr>>(alias: T) -> io::Result<
 /// This uses the [`ConvertInterfaceLuidToAlias`] Windows API function.
 ///
 /// [`ConvertInterfaceLuidToAlias`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfaceluidtoalias
-pub fn convert_interface_luid_to_alias(luid: &NET_LUID_LH) -> io::Result<OsString> {
+pub fn convert_interface_luid_to_alias(luid: impl Into<Luid>) -> io::Result<OsString> {
     let mut buffer = [0u16; IF_MAX_STRING_SIZE as usize + 1];
+    let luid = luid.into();
 
-    let status = unsafe { ConvertInterfaceLuidToAlias(luid, buffer.as_mut_ptr(), buffer.len()) };
+    let status =
+        unsafe { ConvertInterfaceLuidToAlias(luid.as_ref(), buffer.as_mut_ptr(), buffer.len()) };
     if status != NO_ERROR {
         return Err(io::Error::from_raw_os_error(status as i32));
     }
