@@ -33,7 +33,7 @@ fn main() -> io::Result<()> {
                     let interface = updated.as_ref().unwrap_or(interface);
                     println!(
                         "[ADD] Interface added - LUID: {:#x}, Family: {:?}, Metric: {}, MTU: {}",
-                        interface.interface_luid(),
+                        *interface.interface_luid(),
                         interface.family(),
                         interface.metric(),
                         interface.mtu()
@@ -48,7 +48,7 @@ fn main() -> io::Result<()> {
                     let interface = updated.as_ref().unwrap_or(interface);
                     println!(
                         "[DELETE] Interface removed - LUID: {:#x}, Family: {:?}",
-                        interface.interface_luid(),
+                        *interface.interface_luid(),
                         interface.family()
                     );
                 }
@@ -61,7 +61,7 @@ fn main() -> io::Result<()> {
                     let interface = updated.as_ref().unwrap_or(interface);
                     println!(
                         "[CHANGE] Interface parameter changed - LUID: {:#x}, Family: {:?}, Metric: {}, MTU: {}, Auto Metric: {}",
-                        interface.interface_luid(),
+                        *interface.interface_luid(),
                         interface.family(),
                         interface.metric(),
                         interface.mtu(),

@@ -18,8 +18,9 @@
 
 use std::{
     ffi::c_void,
-    io,
+    io, mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    ops::Deref,
     os::windows::io::RawHandle,
     ptr,
     sync::Mutex,
@@ -56,6 +57,65 @@ impl TryFrom<u16> for AddressFamily {
             AF_INET6 => Ok(AddressFamily::Inet6),
             _ => Err(()),
         }
+    }
+}
+
+/// A LUID (Locally Unique Identifier) for a network interface
+///
+/// Can be created from or converted to a `u64` or `NET_LUID_LH`.
+#[repr(transparent)]
+pub struct Luid(u64);
+
+// Ensure Luid and NET_LUID_LH have the same layout
+const _: () = {
+    assert!(mem::size_of::<Luid>() == mem::size_of::<NET_LUID_LH>());
+    assert!(mem::align_of::<Luid>() == mem::align_of::<NET_LUID_LH>());
+};
+
+impl AsRef<Luid> for NET_LUID_LH {
+    fn as_ref(&self) -> &Luid {
+        // SAFETY: Luid and NET_LUID_LH have the same layout
+        unsafe { &*(self as *const NET_LUID_LH as *const Luid) }
+    }
+}
+
+impl AsRef<NET_LUID_LH> for Luid {
+    fn as_ref(&self) -> &NET_LUID_LH {
+        // SAFETY: Luid and NET_LUID_LH have the same layout
+        unsafe { &*(self as *const Luid as *const NET_LUID_LH) }
+    }
+}
+
+impl Deref for Luid {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<NET_LUID_LH> for Luid {
+    fn from(luid: NET_LUID_LH) -> Self {
+        // SAFETY: Always a valid u64
+        Luid(unsafe { luid.Value })
+    }
+}
+
+impl From<u64> for Luid {
+    fn from(value: u64) -> Self {
+        Luid(value)
+    }
+}
+
+impl From<Luid> for u64 {
+    fn from(luid: Luid) -> Self {
+        luid.0
+    }
+}
+
+impl From<Luid> for NET_LUID_LH {
+    fn from(luid: Luid) -> Self {
+        NET_LUID_LH { Value: luid.0 }
     }
 }
 
@@ -127,9 +187,8 @@ impl UnicastIpAddressRow {
     }
 
     /// Get the interface LUID
-    pub fn interface_luid(&self) -> u64 {
-        // SAFETY: Always a valid u64
-        unsafe { self.raw_entry.InterfaceLuid.Value }
+    pub fn interface_luid(&self) -> Luid {
+        Luid::from(self.raw_entry.InterfaceLuid)
     }
 
     /// Get the IP address
@@ -169,7 +228,7 @@ impl UnicastIpAddressRow {
 /// Identifier for a network interface
 pub enum InterfaceIdentifier {
     /// Interface LUID
-    Luid(u64),
+    Luid(Luid),
     /// Interface index
     Index(u32),
 }
@@ -208,10 +267,9 @@ pub fn set_ip_interface_entry(interface: impl AsRef<MIB_IPINTERFACE_ROW>) -> io:
     Ok(())
 }
 
-impl From<NET_LUID_LH> for InterfaceIdentifier {
-    fn from(luid: NET_LUID_LH) -> Self {
-        // SAFETY: Always a valid u64
-        InterfaceIdentifier::Luid(unsafe { luid.Value })
+impl<T: Into<Luid>> From<T> for InterfaceIdentifier {
+    fn from(luid: T) -> Self {
+        InterfaceIdentifier::Luid(luid.into())
     }
 }
 
@@ -252,10 +310,10 @@ impl IpInterfaceRow {
     /// This uses the [`GetIpInterfaceEntry`] Windows API function.
     ///
     /// [`GetIpInterfaceEntry`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipinterfaceentry
-    fn get_by_luid(luid: u64, family: AddressFamily) -> io::Result<Self> {
+    fn get_by_luid(luid: impl Into<Luid>, family: AddressFamily) -> io::Result<Self> {
         Self::get_inner(|| MIB_IPINTERFACE_ROW {
             Family: family as u16,
-            InterfaceLuid: NET_LUID_LH { Value: luid },
+            InterfaceLuid: NET_LUID_LH::from(luid.into()),
             ..Default::default()
         })
     }
@@ -275,9 +333,8 @@ impl IpInterfaceRow {
     /// Get the interface LUID
     ///
     /// Corresponds to the `InterfaceLuid` field in `MIB_IPINTERFACE_ROW`.
-    pub fn interface_luid(&self) -> u64 {
-        // SAFETY: Always a valid u64
-        unsafe { self.row.InterfaceLuid.Value }
+    pub fn interface_luid(&self) -> Luid {
+        Luid::from(self.row.InterfaceLuid)
     }
 
     /// Get the address family

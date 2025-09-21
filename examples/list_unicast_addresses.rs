@@ -13,7 +13,7 @@ fn main() -> Result<(), io::Error> {
         println!("Address {}:", i + 1);
         println!("  Interface Index: {}", address.interface_index());
         println!("  Address Family: {:?}", address.family());
-        println!("  Interface LUID: {:#x}", address.interface_luid());
+        println!("  Interface LUID: {:#x}", *address.interface_luid());
         println!(
             "  IP Address: {}/{}",
             address.address(),
