@@ -1,19 +1,42 @@
-//! Rust-friendly bindings for Windows APIs
+//! ⚠️ **This project is a work in progress.**
 //!
-//! This crate provides type-safe wrappers around Windows APIs, where the standard library is
-//! lacking.
+//! Rust-friendly bindings for Windows APIs. It is not meant to be exhaustive, only cover areas that
+//! the standard library does not.
+//!
+//! # Quick start
+//!
+//! Add this to your `Cargo.toml`:
+//!
+//! ```toml
+//! [dependencies]
+//! dos = "0.0.1"
+//! ```
 //!
 //! # Features
 //!
 //! - `full` - Enable all features
-//! - `net` - Network interface and IP address information
-//! - `process` - Process and module enumeration using Tool Help Library
-//! - `security` - Security information retrieval for Windows objects
-//! - `string` - String conversion utilities with comprehensive code page support
+//! - `net` - Networking
+//! - `process` - Process and module enumeration
+//! - `string` - String conversion utilities
+//! - `security` - Security and access control
+//!
+//! # Guiding principles
+//!
+//! In descending order of importance:
+//!
+//! - **Safety**. `unsafe` must be avoided as much as possible, particularly in public APIs.
+//! - **Lightweight**. Everything is feature-gated, especially dependencies.
+//! - **Zero cost**. Except when it can be justified, we try to avoid needlessly copying data or performing
+//!   unnecessary operations.
+//! - **Escape hatch**. If higher level bindings miss anything, it should be possible to use the raw
+//!   bindings.
+//! - **Minimalism**. APIs should if possible resemble one-to-one mappings to the underlying Windows
+//!   APIs, but with different naming conventions. This improves searchability. For example, the
+//!   underlying `GetUnicastIpAddressTable` API is called `get_unicast_ip_address_table`.
 //!
 //! # Examples
 //!
-//! ## Process enumeration
+//! ## List processes
 //!
 //! List all running processes in the system:
 //!
@@ -30,8 +53,6 @@
 //! # }
 //! # Ok::<(), std::io::Error>(())
 //! ```
-//!
-//! See [process].
 //!
 //! ## Networking
 //!
@@ -51,7 +72,33 @@
 //! # Ok::<(), std::io::Error>(())
 //! ```
 //!
-//! See [net].
+//! ## Security
+//!
+//! Get a security descriptor for a file:
+//!
+//! ```no_run
+//! # #[cfg(feature = "security")]
+//! # {
+//! use dos::security::{get_security_info, SecurityInformation, ObjectType};
+//! use std::fs::File;
+//!
+//! let file = File::open("example.txt")?;
+//! let security_info = get_security_info(
+//!     &file,
+//!     ObjectType::File,
+//!     SecurityInformation::OWNER | SecurityInformation::GROUP
+//! )?;
+//!
+//! if let Some(owner) = security_info.owner() {
+//!     println!("File has owner SID");
+//! }
+//!
+//! if let Some(group) = security_info.group() {
+//!     println!("File has group SID");
+//! }
+//! # }
+//! # Ok::<(), std::io::Error>(())
+//! ```
 //!
 //! ## Strings
 //!
@@ -75,7 +122,14 @@
 //! # Ok::<(), std::io::Error>(())
 //! ```
 //!
-//! See [string].
+//! # Platform support
+//!
+//! This crate is tested on Windows 10 or later. It may work on earlier Windows versions, but there
+//! is no guarantee of that.
+//!
+//! # Contributing
+//!
+//! Contributions are welcome! Please open an issue or a pull request.
 
 #![cfg(target_os = "windows")]
 

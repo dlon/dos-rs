@@ -4,6 +4,7 @@ description = "Rust-friendly bindings for Windows APIs"
 license = "GPL-3.0-only"
 version = "0.0.1"
 edition = "2024"
+readme = "README.md"
 
 [features]
 default = ["full"]

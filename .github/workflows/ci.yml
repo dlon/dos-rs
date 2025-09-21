@@ -58,6 +58,9 @@ jobs:
       - name: Test (default features)
         run: cargo test
 
+      - name: Test documentation
+        run: cargo test --doc
+
   clippy:
     name: Clippy
     runs-on: windows-latest
@@ -102,6 +105,19 @@ jobs:
         run: cargo doc --all-features --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+
+  readme:
+    name: README sync
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-readme
+        run: cargo install cargo-readme
+      - name: Check if README is up to date
+        shell: bash
+        run: ./scripts/check-readme.sh
 
   examples:
     name: Examples
