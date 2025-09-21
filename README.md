@@ -22,6 +22,19 @@ dos = "0.0.1"
 - `security` - Security and access control
 - `full` - Enable all features (default)
 
+## Guiding principles
+
+In descending order of importance:
+
+- **Safety**. `unsafe` must be avoided as much as possible, particularly in public APIs.
+- **Lightweight**. Everything is feature-gated, especially dependencies.
+- **Zero cost**. Except when it can be justified, we try to avoid needlessly copying data or performing
+  unnecessary operations.
+- **Escape hatch**. If higher level bindings provide, it should be possible to use the raw bindings.
+- **Minimalism**. APIs should if possible resemble one-to-one mappings to the underlying Windows
+  APIs, but with different naming conventions. This improves searchability. For example, the
+  underlying `GetUnicastIpAddressTable` API is called `get_unicast_ip_address_table`.
+
 ## Examples
 
 ### List processes
@@ -78,7 +91,8 @@ if let Some(group) = security_info.group() {
 
 ## Platform support
 
-This crate currently requires Windows 10 or later.
+This crate is tested on Windows 10 or later. It may work on earlier Windows versions, but there is
+no guarantee of that.
 
 ## License
 
