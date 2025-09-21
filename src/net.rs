@@ -17,17 +17,24 @@
 //! ```
 
 use std::{
+    ffi::c_void,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    os::windows::io::RawHandle,
     ptr,
+    sync::Mutex,
 };
 use windows_sys::Win32::{
-    Foundation::NO_ERROR,
-    NetworkManagement::IpHelper::{
-        FreeMibTable, GetIpInterfaceEntry, GetUnicastIpAddressTable, MIB_IPINTERFACE_ROW,
-        MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, SetIpInterfaceEntry,
+    Foundation::{ERROR_SUCCESS, NO_ERROR},
+    NetworkManagement::{
+        IpHelper::{
+            CancelMibChangeNotify2, FreeMibTable, GetIpInterfaceEntry, GetUnicastIpAddressTable,
+            MIB_IPINTERFACE_ROW, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE,
+            MibAddInstance, MibDeleteInstance, MibInitialNotification, MibParameterNotification,
+            NotifyIpInterfaceChange, SetIpInterfaceEntry,
+        },
+        Ndis::NET_LUID_LH,
     },
-    NetworkManagement::Ndis::NET_LUID_LH,
     Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC},
 };
 
@@ -219,6 +226,14 @@ pub struct IpInterfaceRow {
 }
 
 impl IpInterfaceRow {
+    /// Create a new `IpInterfaceRow` from a raw `row`, without taking ownership
+    pub fn new(row: &MIB_IPINTERFACE_ROW) -> &Self {
+        let pprows = row as *const MIB_IPINTERFACE_ROW;
+        // SAFETY: row is a valid row, and we preserve its lifetime
+        // Since `IpInterfaceRow` is transparent, we may simply cast it
+        unsafe { &*(pprows.cast()) }
+    }
+
     /// Get an interface entry by index and address family.
     ///
     /// This uses the [`GetIpInterfaceEntry`] Windows API function.
@@ -376,6 +391,135 @@ impl IpInterfaceRowModifier {
 impl AsRef<MIB_IPINTERFACE_ROW> for IpInterfaceRowModifier {
     fn as_ref(&self) -> &MIB_IPINTERFACE_ROW {
         &self.row
+    }
+}
+
+pub enum NotificationType<'a> {
+    /// A parameter of an existing instance has changed.
+    ParameterNotification(&'a IpInterfaceRow),
+    /// A new instance has been added.
+    AddInstance(&'a IpInterfaceRow),
+    /// An existing instance has been deleted.
+    DeleteInstance(&'a IpInterfaceRow),
+    /// Initial notification to confirm registration of callback.
+    InitialNotification,
+}
+
+impl From<&NotificationType<'_>> for i32 {
+    fn from(nt: &NotificationType<'_>) -> Self {
+        match nt {
+            NotificationType::ParameterNotification(_) => MibParameterNotification,
+            NotificationType::AddInstance(_) => MibAddInstance,
+            NotificationType::DeleteInstance(_) => MibDeleteInstance,
+            NotificationType::InitialNotification => MibInitialNotification,
+        }
+    }
+}
+
+/// Callback for `notify_ip_interface_change`
+pub trait NotifyIpInterfaceChangeCb: FnMut(NotificationType<'_>) {}
+
+impl<T: FnMut(NotificationType<'_>)> NotifyIpInterfaceChangeCb for T {}
+
+/// Registers a callback function that is invoked when an interface is added, removed, or changed.
+///
+/// On success, this returns a notification handle. The callback is unregistered and monitoring
+/// stops when the handle is dropped.
+///
+/// This uses the [`NotifyIpInterfaceChange`] Windows API function.
+///
+/// # Arguments
+///
+/// - `family`: The address family to monitor. If `None`, all address families are monitored.
+/// - `callback`: The callback function to invoke when an interface change occurs.
+/// - `initial_notification`: Whether to immediately invoke the callback to confirm
+///   registration of callback.
+///
+/// # Safety
+///
+/// The callback must be Send, as it may be called from another thread.
+///
+/// `NotifyIpInterfaceChange` serializes calls, but not for different families, so it must also hide
+/// its internal state behind a mutex.
+///
+/// [`NotifyIpInterfaceChange`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyipinterfacechange
+pub fn notify_ip_interface_change<'a, T: NotifyIpInterfaceChangeCb + Send + 'a>(
+    family: Option<AddressFamily>,
+    callback: T,
+    initial_notification: bool,
+) -> io::Result<Box<IpInterfaceChangeHandle<'a>>> {
+    let mut context = Box::new(IpInterfaceChangeHandle {
+        callback: Mutex::new(Box::new(callback)),
+        handle: ptr::null_mut(),
+    });
+
+    let status = unsafe {
+        NotifyIpInterfaceChange(
+            family.map(|f| f as u16).unwrap_or(AF_UNSPEC),
+            Some(notify_ip_interface_change_callback),
+            &mut *context.as_mut() as *mut _ as *mut _,
+            initial_notification,
+            (&mut context.handle) as *mut _,
+        )
+    };
+
+    if status != ERROR_SUCCESS {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(context)
+}
+
+/// Handle returned by `notify_ip_interface_change`. When dropped, the callback is unregistered
+/// and monitoring stops.
+pub struct IpInterfaceChangeHandle<'a> {
+    callback: Mutex<Box<dyn NotifyIpInterfaceChangeCb + Send + 'a>>,
+    handle: RawHandle,
+}
+
+unsafe impl Send for IpInterfaceChangeHandle<'_> {}
+
+impl Drop for IpInterfaceChangeHandle<'_> {
+    fn drop(&mut self) {
+        // SAFETY: handle is valid
+        unsafe { CancelMibChangeNotify2(self.handle) };
+    }
+}
+
+#[allow(non_upper_case_globals)]
+unsafe extern "system" fn notify_ip_interface_change_callback(
+    context: *const c_void,
+    row: *const MIB_IPINTERFACE_ROW,
+    notification_type: i32,
+) {
+    if context.is_null() {
+        return;
+    }
+
+    // SAFETY: context and row are valid pointers
+    let context = unsafe { &*(context as *mut IpInterfaceChangeHandle) };
+    let mut callback = context.callback.lock().unwrap();
+
+    if notification_type == MibInitialNotification {
+        (callback)(NotificationType::InitialNotification);
+        return;
+    }
+
+    // SAFETY: `row` is never null for any other notification type
+    let row = unsafe { &*row };
+    let ip_row = IpInterfaceRow::new(row);
+
+    match notification_type {
+        MibParameterNotification => {
+            (callback)(NotificationType::ParameterNotification(ip_row));
+        }
+        MibAddInstance => {
+            (callback)(NotificationType::AddInstance(ip_row));
+        }
+        MibDeleteInstance => {
+            (callback)(NotificationType::DeleteInstance(ip_row));
+        }
+        other => unreachable!("invalid notification type: {other}"),
     }
 }
 
