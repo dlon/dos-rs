@@ -5,9 +5,9 @@
 //! Get all unicast IP addresses on the system:
 //!
 //! ```no_run
-//! use dos::net::UnicastIpAddressTable;
+//! use dos::net::get_unicast_ip_address_table;
 //!
-//! for address in UnicastIpAddressTable::all()? {
+//! for address in get_unicast_ip_address_table(None)? {
 //!     println!("Interface Index: {}", address.interface_index());
 //!     println!("Interface LUID: {:#x}", address.interface_luid());
 //!     println!("Address Family: {:?}", address.family());
@@ -52,17 +52,61 @@ impl TryFrom<u16> for AddressFamily {
     }
 }
 
+/// Retrieve the unicast IP address table for a specific address family
+///
+/// If `family` is `None` (AF_UNSPEC), all address families will be retrieved.
+///
+/// This uses the [`GetUnicastIpAddressTable`] Windows API function.
+///
+/// [`GetUnicastIpAddressTable`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getunicastipaddresstable
+pub fn get_unicast_ip_address_table(
+    family: Option<AddressFamily>,
+) -> io::Result<Vec<UnicastIpAddressRow>> {
+    let mut table: *mut MIB_UNICASTIPADDRESS_TABLE = ptr::null_mut();
+
+    let family = family.map(|f| f as u16).unwrap_or(AF_UNSPEC);
+
+    // SAFETY: `table` is valid to be written to
+    let result = unsafe { GetUnicastIpAddressTable(family, &mut table) };
+
+    if result != NO_ERROR {
+        return Err(io::Error::from_raw_os_error(result as i32));
+    }
+
+    debug_assert_ne!(table, ptr::null_mut());
+
+    // SAFETY: table is valid and points to a MIB_UNICASTIPADDRESS_TABLE
+    let num_entries = usize::try_from(unsafe { (*table).NumEntries }).unwrap();
+    let mut entries = Vec::with_capacity(num_entries);
+
+    for i in 0..num_entries {
+        // SAFETY: We've verified the index is within bounds
+        let raw_entry = unsafe {
+            let entries_ptr = (*table).Table.as_ptr();
+            *entries_ptr.add(i)
+        };
+        entries.push(UnicastIpAddressRow { raw_entry });
+    }
+
+    // SAFETY: All entries are plain old data, and we have copied them
+    unsafe {
+        FreeMibTable(table as *mut _);
+    }
+
+    Ok(entries)
+}
+
 /// A unicast IP address entry from the system's IP address table
 ///
 /// This corresponds to a [`MIB_UNICASTIPADDRESS_ROW`] structure from the Windows API.
 ///
 /// [`MIB_UNICASTIPADDRESS_ROW`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_unicastipaddress_row
 #[repr(transparent)]
-pub struct UnicastIpAddressEntry {
+pub struct UnicastIpAddressRow {
     raw_entry: MIB_UNICASTIPADDRESS_ROW,
 }
 
-impl UnicastIpAddressEntry {
+impl UnicastIpAddressRow {
     /// Get the network interface index
     pub fn interface_index(&self) -> u32 {
         self.raw_entry.InterfaceIndex
@@ -108,97 +152,59 @@ impl UnicastIpAddressEntry {
             _ => panic!("invalid prefix length"),
         }
     }
+
+    /// Get the raw `MIB_UNICASTIPADDRESS_ROW` structure
+    pub fn as_raw(&self) -> &MIB_UNICASTIPADDRESS_ROW {
+        &self.raw_entry
+    }
 }
 
-/// Table of unicast IP addresses on the system
+/// Identifier for a network interface
+pub enum InterfaceIdentifier {
+    /// Interface LUID
+    Luid(u64),
+    /// Interface index
+    Index(u32),
+}
+
+/// Get an interface entry by LUID and address family.
 ///
-/// This uses the [`GetUnicastIpAddressTable`] Windows API function.
+/// This uses the [`GetIpInterfaceEntry`] Windows API function.
 ///
-/// [`GetUnicastIpAddressTable`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getunicastipaddresstable
-pub struct UnicastIpAddressTable {
-    entries: Vec<UnicastIpAddressEntry>,
-}
-
-impl UnicastIpAddressTable {
-    /// Retrieve the unicast IP address table for all address families
-    pub fn all() -> io::Result<Self> {
-        Self::get_for_family(None)
-    }
-
-    /// Retrieve the unicast IP address table for a specific address family
-    ///
-    /// If `family` is `None`, all address families will be retrieved.
-    pub fn get_for_family(family: Option<AddressFamily>) -> io::Result<Self> {
-        let mut table: *mut MIB_UNICASTIPADDRESS_TABLE = ptr::null_mut();
-
-        let family = family.map(|f| f as u16).unwrap_or(AF_UNSPEC);
-
-        // SAFETY: `table` is valid to be written to
-        let result = unsafe { GetUnicastIpAddressTable(family, &mut table) };
-
-        if result != NO_ERROR {
-            return Err(io::Error::from_raw_os_error(result as i32));
-        }
-
-        debug_assert_ne!(table, ptr::null_mut());
-
-        // SAFETY: table is valid and points to a MIB_UNICASTIPADDRESS_TABLE
-        let num_entries = usize::try_from(unsafe { (*table).NumEntries }).unwrap();
-        let mut entries = Vec::with_capacity(num_entries);
-
-        for i in 0..num_entries {
-            // SAFETY: We've verified the index is within bounds
-            let raw_entry = unsafe {
-                let entries_ptr = (*table).Table.as_ptr();
-                *entries_ptr.add(i)
-            };
-            entries.push(UnicastIpAddressEntry { raw_entry });
-        }
-
-        // SAFETY: All entries are plain old data, and we have copied them
-        unsafe {
-            FreeMibTable(table as *mut _);
-        }
-
-        Ok(UnicastIpAddressTable { entries })
-    }
-
-    /// Get the number of entries in the table
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// Check if the table is empty
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    /// Get an iterator over the IP address entries
-    pub fn iter(&self) -> impl Iterator<Item = &UnicastIpAddressEntry> {
-        self.entries.iter()
-    }
-
-    /// Get a specific entry by index
-    pub fn get(&self, index: usize) -> Option<&UnicastIpAddressEntry> {
-        self.entries.get(index)
+/// [`GetIpInterfaceEntry`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipinterfaceentry
+pub fn get_ip_interface_entry(
+    id: impl Into<InterfaceIdentifier>,
+    family: AddressFamily,
+) -> io::Result<IpInterfaceRow> {
+    match id.into() {
+        InterfaceIdentifier::Luid(luid) => IpInterfaceRow::get_by_luid(luid, family),
+        InterfaceIdentifier::Index(index) => IpInterfaceRow::get_by_index(index, family),
     }
 }
 
-impl IntoIterator for UnicastIpAddressTable {
-    type Item = UnicastIpAddressEntry;
-    type IntoIter = std::vec::IntoIter<UnicastIpAddressEntry>;
+/// Set an interface entry. The interface is identified by LUID or index.
+///
+/// This uses the [`SetIpInterfaceEntry`] Windows API function.
+///
+/// Note that `SitePrefixLength` must be cleared when setting the entry, at least for IPv4.
+///
+/// [`SetIpInterfaceEntry`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setipinterfaceentry
+pub fn set_ip_interface_entry(interface: impl AsRef<MIB_IPINTERFACE_ROW>) -> io::Result<()> {
+    let interface = interface.as_ref();
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.entries.into_iter()
+    // SAFETY: `interface` is initialized, and SetIpInterfaceEntry does not actually modify data
+    let status = unsafe { SetIpInterfaceEntry(interface as *const _ as *mut _) };
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status as i32));
     }
+
+    Ok(())
 }
 
-impl<'a> IntoIterator for &'a UnicastIpAddressTable {
-    type Item = &'a UnicastIpAddressEntry;
-    type IntoIter = std::slice::Iter<'a, UnicastIpAddressEntry>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.entries.iter()
+impl From<NET_LUID_LH> for InterfaceIdentifier {
+    fn from(luid: NET_LUID_LH) -> Self {
+        // SAFETY: Always a valid u64
+        InterfaceIdentifier::Luid(unsafe { luid.Value })
     }
 }
 
@@ -208,33 +214,47 @@ impl<'a> IntoIterator for &'a UnicastIpAddressTable {
 ///
 /// [`MIB_IPINTERFACE_ROW`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_ipinterface_row
 #[repr(transparent)]
-pub struct InterfaceEntry {
+pub struct IpInterfaceRow {
     row: MIB_IPINTERFACE_ROW,
 }
 
-impl InterfaceEntry {
+impl IpInterfaceRow {
+    /// Get an interface entry by index and address family.
+    ///
+    /// This uses the [`GetIpInterfaceEntry`] Windows API function.
+    ///
+    /// [`GetIpInterfaceEntry`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipinterfaceentry
+    fn get_by_index(index: u32, family: AddressFamily) -> io::Result<Self> {
+        Self::get_inner(|| MIB_IPINTERFACE_ROW {
+            Family: family as u16,
+            InterfaceIndex: index,
+            ..Default::default()
+        })
+    }
+
     /// Get an interface entry by LUID and address family.
     ///
     /// This uses the [`GetIpInterfaceEntry`] Windows API function.
     ///
     /// [`GetIpInterfaceEntry`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipinterfaceentry
-    pub fn get(luid: u64, family: AddressFamily) -> io::Result<Self> {
-        let luid = NET_LUID_LH { Value: luid };
-        let family = family as u16;
-
-        let mut row = MIB_IPINTERFACE_ROW {
-            InterfaceLuid: luid,
-            Family: family,
+    fn get_by_luid(luid: u64, family: AddressFamily) -> io::Result<Self> {
+        Self::get_inner(|| MIB_IPINTERFACE_ROW {
+            Family: family as u16,
+            InterfaceLuid: NET_LUID_LH { Value: luid },
             ..Default::default()
-        };
+        })
+    }
 
-        // SAFETY: `row` is initialized and has luid set
+    fn get_inner(make_row: impl FnOnce() -> MIB_IPINTERFACE_ROW) -> io::Result<Self> {
+        let mut row = make_row();
+
+        // SAFETY: `row` is initialized
         let status = unsafe { GetIpInterfaceEntry(&mut row) };
         if status != 0 {
             return Err(io::Error::from_raw_os_error(status as i32));
         }
 
-        Ok(InterfaceEntry { row })
+        Ok(IpInterfaceRow { row })
     }
 
     /// Get the interface LUID
@@ -273,9 +293,25 @@ impl InterfaceEntry {
         self.row.NlMtu
     }
 
-    /// Create a builder to modify this interface entry
-    pub fn modify(self) -> InterfaceEntryModifier {
-        InterfaceEntryModifier { row: self.row }
+    /// Create a convenience builder to modify this interface entry
+    pub fn modify(self) -> IpInterfaceRowModifier {
+        IpInterfaceRowModifier { row: self.row }
+    }
+
+    /// Get the raw `MIB_IPINTERFACE_ROW` structure
+    pub fn as_raw(&self) -> &MIB_IPINTERFACE_ROW {
+        &self.row
+    }
+
+    /// Get a mutable reference to the raw `MIB_IPINTERFACE_ROW` structure
+    pub fn as_raw_mut(&mut self) -> &mut MIB_IPINTERFACE_ROW {
+        &mut self.row
+    }
+}
+
+impl AsRef<MIB_IPINTERFACE_ROW> for IpInterfaceRow {
+    fn as_ref(&self) -> &MIB_IPINTERFACE_ROW {
+        &self.row
     }
 }
 
@@ -284,17 +320,11 @@ impl InterfaceEntry {
 /// On save, this calls the [`SetIpInterfaceEntry`] Windows API function.
 ///
 /// [`SetIpInterfaceEntry`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setipinterfaceentry
-pub struct InterfaceEntryModifier {
+pub struct IpInterfaceRowModifier {
     row: MIB_IPINTERFACE_ROW,
 }
 
-impl InterfaceEntryModifier {
-    /// Create a builder for an interface entry by LUID and address family
-    pub fn new(luid: u64, family: AddressFamily) -> io::Result<Self> {
-        let entry = InterfaceEntry::get(luid, family)?;
-        Ok(entry.modify())
-    }
-
+impl IpInterfaceRowModifier {
     /// Set the interface metric
     ///
     /// Corresponds to the `Metric` field in `MIB_IPINTERFACE_ROW`. Note that this also
@@ -322,31 +352,30 @@ impl InterfaceEntryModifier {
     }
 
     /// Modify the raw `MIB_IPINTERFACE_ROW` structure
-    pub fn raw_edit(mut self, modifier_fn: impl FnOnce(&mut MIB_IPINTERFACE_ROW)) -> Self {
-        modifier_fn(&mut self.row);
-        self
+    pub fn as_raw_mut(&mut self) -> &mut MIB_IPINTERFACE_ROW {
+        &mut self.row
     }
 
     /// Apply changes to the system
     ///
-    /// This calls the [`SetIpInterfaceEntry`] Windows API function.
-    ///
-    /// [`SetIpInterfaceEntry`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setipinterfaceentry
+    /// This calls [`set_ip_interface_entry`].
     pub fn save(mut self) -> io::Result<()> {
         // Temporarily clear SitePrefixLength to avoid errors
         // See docs: It must be zeroed, at least for IPv4.
         let prev_prefix_len = self.row.SitePrefixLength;
         self.row.SitePrefixLength = 0;
 
-        // SAFETY: `raw` is initialized
-        let status = unsafe { SetIpInterfaceEntry(&mut self.row) };
+        set_ip_interface_entry(&self)?;
 
         self.row.SitePrefixLength = prev_prefix_len;
 
-        if status != 0 {
-            return Err(io::Error::from_raw_os_error(status as i32));
-        }
         Ok(())
+    }
+}
+
+impl AsRef<MIB_IPINTERFACE_ROW> for IpInterfaceRowModifier {
+    fn as_ref(&self) -> &MIB_IPINTERFACE_ROW {
+        &self.row
     }
 }
 
@@ -356,10 +385,8 @@ mod tests {
 
     #[test]
     fn test_get_unicast_table() {
-        let table = UnicastIpAddressTable::all().expect("Failed to get IP address table");
-        println!("Found {} IP addresses", table.len());
-
-        for address in table.iter().take(5) {
+        let table = get_unicast_ip_address_table(None).expect("Failed to get IP address table");
+        for address in table {
             println!(
                 "Interface: {}, Family: {:?}",
                 address.interface_index(),

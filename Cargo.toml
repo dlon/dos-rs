@@ -15,6 +15,7 @@ process = [
 ]
 string = ["windows-sys/Win32_Globalization"]
 security = [
+    "dep:bitflags",
     "windows-sys/Win32_Security",
     "windows-sys/Win32_Security_Authorization",
     "windows-sys/Win32_System_Memory",

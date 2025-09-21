@@ -174,7 +174,7 @@ define_int_enum!("Windows code page identifiers", u32, CodePage {
 /// This corresponds to the [`MultiByteToWideChar`] Windows API function.
 ///
 /// [`MultiByteToWideChar`]: https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-multibytetowidechar
-pub fn from_multibyte(s: &CStr, codepage: CodePage) -> Result<OsString, io::Error> {
+pub fn multi_byte_to_wide_char(s: &CStr, codepage: CodePage) -> Result<OsString, io::Error> {
     if s.is_empty() {
         return Ok(OsString::new());
     }
@@ -227,12 +227,12 @@ mod test {
     #[test]
     fn test_multibyte_to_wide() {
         // € = 0x20AC in UTF-16
-        let converted = from_multibyte(c"€€", CodePage::Utf8).unwrap();
+        let converted = multi_byte_to_wide_char(c"€€", CodePage::Utf8).unwrap();
         let expected = OsString::from_wide(&[0x20AC, 0x20AC]);
         assert_eq!(converted, expected, "unexpected result {converted:?}");
 
         // boundary case
-        let converted = from_multibyte(c"", CodePage::Utf8).unwrap();
+        let converted = multi_byte_to_wide_char(c"", CodePage::Utf8).unwrap();
         let expected = OsString::new();
         assert_eq!(converted, expected, "unexpected result {converted:?}");
     }

@@ -20,10 +20,10 @@
 //! ```no_run
 //! # #[cfg(feature = "process")]
 //! # {
-//! use dos::process::ProcessSnapshot;
+//! use dos::process::{SnapshotFlags, create_toolhelp32_snapshot};
 //!
-//! let snapshot = ProcessSnapshot::processes()?;
-//! for process in snapshot.iter_processes().take(5) {
+//! let snapshot = create_toolhelp32_snapshot(SnapshotFlags::PROCESS, 0)?;
+//! for process in snapshot.processes().take(5) {
 //!     let process = process?;
 //!     println!("Process ID: {}, Parent ID: {}", process.pid(), process.parent_pid());
 //! }
@@ -40,10 +40,11 @@
 //! ```no_run
 //! # #[cfg(feature = "net")]
 //! # {
-//! use dos::net::UnicastIpAddressTable;
+//! use dos::net::get_unicast_ip_address_table;
 //!
-//! for address in UnicastIpAddressTable::all()? {
+//! for address in get_unicast_ip_address_table(None)? {
 //!     println!("Interface Index: {}", address.interface_index());
+//!     println!("Address: {}", address.address());
 //!     println!("Address Family: {:?}", address.family());
 //! }
 //! # }
@@ -59,16 +60,16 @@
 //! ```no_run
 //! # #[cfg(feature = "string")]
 //! # {
-//! use dos::string::{from_multibyte, CodePage};
+//! use dos::string::{multi_byte_to_wide_char, CodePage};
 //!
 //! // Convert UTF-8 encoded C string to an OsString
 //! let c_str = c"Hello, World!";
-//! let os_string = from_multibyte(c_str, CodePage::Utf8)?;
+//! let os_string = multi_byte_to_wide_char(c_str, CodePage::Utf8)?;
 //! println!("Converted: {:?}", os_string);
 //!
 //! // Convert from Windows-1252 (Western European)
 //! let c_str = c"Caf\xe9"; // "Café" in Windows-1252
-//! let os_string = from_multibyte(c_str, CodePage::Windows1252)?;
+//! let os_string = multi_byte_to_wide_char(c_str, CodePage::Windows1252)?;
 //! println!("From Windows-1252: {:?}", os_string);
 //! # }
 //! # Ok::<(), std::io::Error>(())

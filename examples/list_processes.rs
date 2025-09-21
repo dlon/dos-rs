@@ -4,14 +4,14 @@ use std::io;
 
 #[cfg(feature = "process")]
 pub fn main() -> Result<(), io::Error> {
-    use dos::process::{ProcessSnapshot, SnapshotFlags};
+    use dos::process::{SnapshotFlags, create_toolhelp32_snapshot};
 
     println!("Listing all running processes:\n");
 
     // Create a snapshot of all processes and modules
-    let snapshot = ProcessSnapshot::new(SnapshotFlags::PROCESS | SnapshotFlags::MODULE, 0)?;
+    let snapshot = create_toolhelp32_snapshot(SnapshotFlags::PROCESS | SnapshotFlags::MODULE, 0)?;
 
-    for process in snapshot.iter_processes().take(10) {
+    for process in snapshot.processes().take(10) {
         let process = process?;
         println!(
             "Process ID: {}, Parent ID: {}",
@@ -24,7 +24,7 @@ pub fn main() -> Result<(), io::Error> {
     // Create a snapshot of modules in the current process
     println!("\n\nListing modules in current process:\n");
 
-    for module in snapshot.iter_modules().take(5) {
+    for module in snapshot.modules().take(5) {
         let module = module?;
         println!(
             "Module: {:?}, Base: {:p}, Size: {} bytes",

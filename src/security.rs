@@ -5,12 +5,12 @@
 //! Get security information for a file:
 //!
 //! ```no_run
-//! use dos::security::{SecurityInfo, SecurityInformation, ObjectType};
+//! use dos::security::{SecurityInformation, ObjectType, get_security_info};
 //! use std::fs::File;
 //! use std::os::windows::io::AsRawHandle;
 //!
 //! let file = File::open("example.txt")?;
-//! let security_info = SecurityInfo::from_handle(
+//! let security_info = get_security_info(
 //!     &file,
 //!     ObjectType::File,
 //!     SecurityInformation::OWNER | SecurityInformation::GROUP
@@ -96,6 +96,32 @@ bitflags! {
     }
 }
 
+/// Get security information for an object.
+///
+/// This calls the underlying [`GetSecurityInfo`] Windows API function.
+///
+/// [`GetSecurityInfo`]: https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-getsecurityinfo
+pub fn get_security_info<T: AsRawHandle>(
+    handle: &T,
+    object_type: ObjectType,
+    info: SecurityInformation,
+) -> io::Result<SecurityInfo> {
+    SecurityInfo::from_handle(handle, object_type, info)
+}
+
+/// Get security information for an object specified by name.
+///
+/// This calls the underlying [`GetNamedSecurityInfoW`] Windows API function.
+///
+/// [`GetNamedSecurityInfoW`]: https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-getnamedsecurityinfow
+pub fn get_named_security_info(
+    name: impl AsRef<OsStr>,
+    object_type: ObjectType,
+    info: SecurityInformation,
+) -> io::Result<SecurityInfo> {
+    SecurityInfo::from_name(name, object_type, info)
+}
+
 /// Copy of a security descriptor for an object
 pub struct SecurityInfo {
     /// Owner SID
@@ -108,7 +134,7 @@ pub struct SecurityInfo {
     /// System ACL
     // TODO
     //sacl: Option<*mut ACL>,
-    /// Security descriptor (must be freed with LocalFree)
+    /// Raw security descriptor
     security_descriptor: *mut SECURITY_DESCRIPTOR,
 }
 
@@ -118,7 +144,7 @@ impl SecurityInfo {
     /// This calls the underlying [`GetSecurityInfo`] Windows API function.
     ///
     /// [`GetSecurityInfo`]: https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-getsecurityinfo
-    pub fn from_handle<T: AsRawHandle>(
+    fn from_handle<T: AsRawHandle>(
         handle: &T,
         object_type: ObjectType,
         info: SecurityInformation,
@@ -145,7 +171,7 @@ impl SecurityInfo {
     /// This calls the underlying [`GetNamedSecurityInfoW`] Windows API function.
     ///
     /// [`GetNamedSecurityInfoW`]: https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-getnamedsecurityinfow
-    pub fn from_name(
+    fn from_name(
         name: impl AsRef<OsStr>,
         object_type: ObjectType,
         info: SecurityInformation,
@@ -353,6 +379,15 @@ impl AsRawHandle for Sid {
     }
 }
 
+/// Create a well-known SID
+///
+/// This calls the underlying [`CreateWellKnownSid`] Windows API function.
+///
+/// [`CreateWellKnownSid`]: https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createwellknownsid
+pub fn create_well_known_sid(sid_type: WellKnownSidType) -> io::Result<OwnedSid> {
+    OwnedSid::create_well_known(sid_type)
+}
+
 /// An owned security identifier (SID)
 pub struct OwnedSid {
     sid: Vec<u8>,
@@ -364,7 +399,7 @@ impl OwnedSid {
     /// This calls the underlying [`CreateWellKnownSid`] Windows API function.
     ///
     /// [`CreateWellKnownSid`]: https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createwellknownsid
-    pub fn create_well_known(sid_type: WellKnownSidType) -> io::Result<Self> {
+    fn create_well_known(sid_type: WellKnownSidType) -> io::Result<Self> {
         use windows_sys::Win32::Security::CreateWellKnownSid;
 
         let mut sid_size = SECURITY_MAX_SID_SIZE;
@@ -414,7 +449,7 @@ mod tests {
 
     #[test]
     fn test_well_known_sid() {
-        let admin_sid = OwnedSid::create_well_known(WellKnownSidType::BuiltinAdministrators)
+        let admin_sid = create_well_known_sid(WellKnownSidType::BuiltinAdministrators)
             .expect("Failed to create well-known SID");
 
         let admin_sid_ref = admin_sid.as_sid();
@@ -430,9 +465,8 @@ mod tests {
             .open(r"C:\Windows\Temp")
             .unwrap();
 
-        let temp_info =
-            SecurityInfo::from_handle(&path, ObjectType::File, SecurityInformation::OWNER)
-                .expect("Failed to get security info by name");
+        let temp_info = get_security_info(&path, ObjectType::File, SecurityInformation::OWNER)
+            .expect("Failed to get security info by name");
 
         let owner = temp_info.owner().unwrap();
 

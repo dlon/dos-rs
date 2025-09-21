@@ -42,12 +42,12 @@ In descending order of importance:
 List all running processes in the system:
 
 ```rust
-use dos::process::ProcessSnapshot;
+use dos::process::{SnapshotFlags, create_toolhelp32_snapshot};
 
-let snapshot = ProcessSnapshot::processes()?;
-for process in snapshot.iter_processes().take(5) {
+let snapshot = create_toolhelp32_snapshot(SnapshotFlags::PROCESS, 0)?;
+for process in snapshot.processes() {
     let process = process?;
-    println!("Process ID: {}, Parent ID: {}", process.pid, process.parent_pid);
+    println!("Process ID: {}, Parent ID: {}", process.pid(), process.parent_pid());
 }
 ```
 
@@ -56,9 +56,9 @@ for process in snapshot.iter_processes().take(5) {
 Get all unicast IP addresses on the system:
 
 ```rust
-use dos::net::UnicastIpAddressTable;
+use dos::net::get_unicast_ip_address_table;
 
-for address in UnicastIpAddressTable::all()? {
+for address in get_unicast_ip_address_table(None)? {
     println!("Interface Index: {}", address.interface_index());
     println!("Address: {}", address.address());
     println!("Address Family: {:?}", address.family());
@@ -70,11 +70,11 @@ for address in UnicastIpAddressTable::all()? {
 Get a security descriptor for a file:
 
 ```rust
-use dos::security::{SecurityInfo, SecurityInformation, ObjectType};
+use dos::security::{get_security_info, SecurityInformation, ObjectType};
 use std::fs::File;
 
 let file = File::open("example.txt")?;
-let security_info = SecurityInfo::get(
+let security_info = get_security_info(
     &file,
     ObjectType::File,
     SecurityInformation::OWNER | SecurityInformation::GROUP

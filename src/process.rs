@@ -5,10 +5,10 @@
 //! List all running processes:
 //!
 //! ```no_run
-//! use dos::process::ProcessSnapshot;
+//! use dos::process::{create_toolhelp32_snapshot, SnapshotFlags};
 //!
-//! let snapshot = ProcessSnapshot::processes()?;
-//! for process in snapshot.iter_processes() {
+//! let snapshot = create_toolhelp32_snapshot(SnapshotFlags::PROCESS, 0)?;
+//! for process in snapshot.processes() {
 //!     let process = process?;
 //!     println!("Process ID: {}, Parent ID: {}", process.pid(), process.parent_pid());
 //! }
@@ -18,12 +18,12 @@
 //! List all modules in the current process:
 //!
 //! ```no_run
-//! use dos::process::ProcessSnapshot;
+//! use dos::process::{create_toolhelp32_snapshot, SnapshotFlags};
 //! use std::process;
 //!
 //! let current_pid = process::id();
-//! let snapshot = ProcessSnapshot::modules(current_pid)?;
-//! for module in snapshot.iter_modules() {
+//! let snapshot = create_toolhelp32_snapshot(SnapshotFlags::MODULE, current_pid)?;
+//! for module in snapshot.modules() {
 //!     let module = module?;
 //!     println!("Module: {:?}, Base: {:p}, Size: {} bytes",
 //!              module.name(), module.base_address(), module.size());
@@ -71,34 +71,46 @@ bitflags! {
 /// This uses the [`CreateToolhelp32Snapshot`] Windows API function.
 ///
 /// [`CreateToolhelp32Snapshot`]: https://learn.microsoft.com/en-us/windows/win32/api/tlhelp32/nf-tlhelp32-createtoolhelp32snapshot
+pub fn create_toolhelp32_snapshot(
+    flags: SnapshotFlags,
+    process_id: u32,
+) -> io::Result<ProcessSnapshot> {
+    ProcessSnapshot::new(flags, process_id)
+}
+
+/// A snapshot of process modules and heaps.
+///
+/// This uses the [`CreateToolhelp32Snapshot`] Windows API function.
+///
+/// [`CreateToolhelp32Snapshot`]: https://learn.microsoft.com/en-us/windows/win32/api/tlhelp32/nf-tlhelp32-createtoolhelp32snapshot
 pub struct ProcessSnapshot {
     handle: HANDLE,
 }
 
 impl ProcessSnapshot {
     /// Create a snapshot of all processes in the system.
-    pub fn processes() -> io::Result<ProcessSnapshot> {
+    pub fn new_processes() -> io::Result<ProcessSnapshot> {
         Self::new(SnapshotFlags::PROCESS, 0)
     }
 
     /// Create a snapshot of modules in the specified process.
     ///
     /// `process_id` can be `0` to indicate the current process.
-    pub fn modules(process_id: u32) -> io::Result<ProcessSnapshot> {
+    pub fn new_modules(process_id: u32) -> io::Result<ProcessSnapshot> {
         Self::new(SnapshotFlags::MODULE, process_id)
     }
 
     /// Create a snapshot of 32-bit modules in the specified process when called from a 64-bit process.
     ///
     /// `process_id` can be `0` to indicate the current process.
-    pub fn modules32(process_id: u32) -> io::Result<ProcessSnapshot> {
+    pub fn new_modules32(process_id: u32) -> io::Result<ProcessSnapshot> {
         Self::new(SnapshotFlags::MODULE32, process_id)
     }
 
     /// Create a new process snapshot using [`CreateToolhelp32Snapshot`] with custom flags.
     ///
     /// [`CreateToolhelp32Snapshot`]: https://learn.microsoft.com/en-us/windows/win32/api/tlhelp32/nf-tlhelp32-createtoolhelp32snapshot
-    pub fn new(flags: SnapshotFlags, process_id: u32) -> io::Result<ProcessSnapshot> {
+    fn new(flags: SnapshotFlags, process_id: u32) -> io::Result<ProcessSnapshot> {
         // SAFETY: Trivially safe
         let snap = unsafe { CreateToolhelp32Snapshot(flags.bits(), process_id) };
 
@@ -115,7 +127,7 @@ impl ProcessSnapshot {
     }
 
     /// Return an iterator over the modules in the snapshot
-    pub fn iter_modules(&self) -> ProcessSnapshotModules<'_> {
+    pub fn modules(&self) -> ProcessSnapshotModules<'_> {
         let entry = MODULEENTRY32W {
             dwSize: mem::size_of::<MODULEENTRY32W>() as u32,
             ..Default::default()
@@ -129,7 +141,7 @@ impl ProcessSnapshot {
     }
 
     /// Return an iterator over the processes in the snapshot
-    pub fn iter_processes(&self) -> ProcessSnapshotEntries<'_> {
+    pub fn processes(&self) -> ProcessSnapshotEntries<'_> {
         let entry = PROCESSENTRY32W {
             dwSize: mem::size_of::<PROCESSENTRY32W>() as u32,
             ..Default::default()
@@ -181,6 +193,11 @@ impl ModuleEntry {
     /// Get the size of the module (in bytes)
     pub fn size(&self) -> usize {
         usize::try_from(self.entry.modBaseSize).unwrap()
+    }
+
+    /// Get the raw `MODULEENTRY32W` structure
+    pub fn as_raw(&self) -> &MODULEENTRY32W {
+        &self.entry
     }
 }
 
@@ -237,6 +254,11 @@ impl ProcessEntry {
     /// Get the parent process identifier
     pub fn parent_pid(&self) -> u32 {
         self.entry.th32ParentProcessID
+    }
+
+    /// Get the raw `PROCESSENTRY32W` structure
+    pub fn as_raw(&self) -> &PROCESSENTRY32W {
+        &self.entry
     }
 }
 

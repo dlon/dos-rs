@@ -4,11 +4,11 @@ use std::io;
 
 #[cfg(feature = "net")]
 fn main() -> Result<(), io::Error> {
-    use dos::net::UnicastIpAddressTable;
+    use dos::net::get_unicast_ip_address_table;
 
     println!("Listing all unicast IP addresses on the system:\n");
 
-    let table = UnicastIpAddressTable::all()?;
+    let table = get_unicast_ip_address_table(None)?;
     for (i, address) in table.iter().enumerate() {
         println!("Address {}:", i + 1);
         println!("  Interface Index: {}", address.interface_index());
