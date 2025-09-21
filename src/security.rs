@@ -555,6 +555,15 @@ pub enum WellKnownSidType {
     //BuiltinOpenSSHUsers = WinBuiltinOpenSSHUsersSid,
 }
 
+/// Check if this SID matches a specific well-known SID type
+///
+/// This calls the underlying [`IsWellKnownSid`] Windows API function.
+///
+/// [`IsWellKnownSid`]: https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-iswellknownsid
+pub fn is_well_known_sid(sid: &Sid, sid_type: WellKnownSidType) -> bool {
+    sid.is_well_known_sid(sid_type)
+}
+
 /// A security identifier (SID)
 #[repr(transparent)]
 pub struct Sid {
