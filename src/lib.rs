@@ -78,6 +78,9 @@
 
 #![cfg(target_os = "windows")]
 
+// Re-export windows-sys
+pub use windows_sys;
+
 #[cfg(feature = "net")]
 pub mod net;
 #[cfg(feature = "process")]
