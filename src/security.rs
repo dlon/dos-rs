@@ -45,15 +45,50 @@ use windows_sys::Win32::{
         },
         DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, IsWellKnownSid,
         OWNER_SECURITY_INFORMATION, PSID, SACL_SECURITY_INFORMATION, SECURITY_DESCRIPTOR,
-        SECURITY_MAX_SID_SIZE, WinAnonymousSid, WinAuthenticatedUserSid, WinBatchSid,
-        WinBuiltinAccountOperatorsSid, WinBuiltinAdministratorsSid, WinBuiltinBackupOperatorsSid,
-        WinBuiltinDomainSid, WinBuiltinGuestsSid, WinBuiltinPowerUsersSid,
-        WinBuiltinPrintOperatorsSid, WinBuiltinReplicatorSid, WinBuiltinSystemOperatorsSid,
-        WinBuiltinUsersSid, WinCreatorGroupSid, WinCreatorOwnerSid, WinDialupSid,
-        WinEnterpriseControllersSid, WinInteractiveSid, WinLocalServiceSid, WinLocalSid,
-        WinLocalSystemSid, WinNetworkServiceSid, WinNetworkSid, WinNtAuthoritySid, WinNullSid,
-        WinProxySid, WinRemoteLogonIdSid, WinRestrictedCodeSid, WinSelfSid, WinServiceSid,
-        WinTerminalServerSid, WinWorldSid,
+        SECURITY_MAX_SID_SIZE, WinAccountAdministratorSid, WinAccountCertAdminsSid,
+        WinAccountCloneableControllersSid, WinAccountComputersSid, WinAccountControllersSid,
+        WinAccountDefaultSystemManagedSid, WinAccountDomainAdminsSid, WinAccountDomainGuestsSid,
+        WinAccountDomainUsersSid, WinAccountEnterpriseAdminsSid, WinAccountEnterpriseKeyAdminsSid,
+        WinAccountGuestSid, WinAccountKeyAdminsSid, WinAccountKrbtgtSid, WinAccountPolicyAdminsSid,
+        WinAccountProtectedUsersSid, WinAccountRasAndIasServersSid,
+        WinAccountReadonlyControllersSid, WinAnonymousSid, WinApplicationPackageAuthoritySid,
+        WinAuthenticatedUserSid, WinAuthenticationAuthorityAssertedSid,
+        WinAuthenticationFreshKeyAuthSid, WinAuthenticationKeyPropertyAttestationSid,
+        WinAuthenticationKeyPropertyMFASid, WinAuthenticationKeyTrustSid,
+        WinAuthenticationServiceAssertedSid, WinBatchSid,
+        WinBuiltinAccessControlAssistanceOperatorsSid, WinBuiltinAccountOperatorsSid,
+        WinBuiltinAdministratorsSid, WinBuiltinAnyPackageSid, WinBuiltinAuthorizationAccessSid,
+        WinBuiltinBackupOperatorsSid, WinBuiltinCertSvcDComAccessGroup,
+        WinBuiltinCryptoOperatorsSid, WinBuiltinDCOMUsersSid,
+        WinBuiltinDefaultSystemManagedGroupSid, WinBuiltinDeviceOwnersSid, WinBuiltinDomainSid,
+        WinBuiltinEventLogReadersGroup, WinBuiltinGuestsSid, WinBuiltinHyperVAdminsSid,
+        WinBuiltinIUsersSid, WinBuiltinIncomingForestTrustBuildersSid,
+        WinBuiltinNetworkConfigurationOperatorsSid, WinBuiltinPerfLoggingUsersSid,
+        WinBuiltinPerfMonitoringUsersSid, WinBuiltinPowerUsersSid,
+        WinBuiltinPreWindows2000CompatibleAccessSid, WinBuiltinPrintOperatorsSid,
+        WinBuiltinRDSEndpointServersSid, WinBuiltinRDSManagementServersSid,
+        WinBuiltinRDSRemoteAccessServersSid, WinBuiltinRemoteDesktopUsersSid,
+        WinBuiltinRemoteManagementUsersSid, WinBuiltinReplicatorSid,
+        WinBuiltinStorageReplicaAdminsSid, WinBuiltinSystemOperatorsSid,
+        WinBuiltinTerminalServerLicenseServersSid, WinBuiltinUsersSid,
+        WinCacheablePrincipalsGroupSid, WinCapabilityAppointmentsSid, WinCapabilityContactsSid,
+        WinCapabilityDocumentsLibrarySid, WinCapabilityEnterpriseAuthenticationSid,
+        WinCapabilityInternetClientServerSid, WinCapabilityInternetClientSid,
+        WinCapabilityMusicLibrarySid, WinCapabilityPicturesLibrarySid,
+        WinCapabilityPrivateNetworkClientServerSid, WinCapabilityRemovableStorageSid,
+        WinCapabilitySharedUserCertificatesSid, WinCapabilityVideosLibrarySid, WinConsoleLogonSid,
+        WinCreatorGroupServerSid, WinCreatorGroupSid, WinCreatorOwnerRightsSid,
+        WinCreatorOwnerServerSid, WinCreatorOwnerSid, WinDialupSid, WinDigestAuthenticationSid,
+        WinEnterpriseControllersSid, WinEnterpriseReadonlyControllersSid, WinHighLabelSid,
+        WinIUserSid, WinInteractiveSid, WinLocalAccountAndAdministratorSid, WinLocalAccountSid,
+        WinLocalLogonSid, WinLocalServiceSid, WinLocalSid, WinLocalSystemSid, WinLogonIdsSid,
+        WinLowLabelSid, WinMediumLabelSid, WinMediumPlusLabelSid, WinNTLMAuthenticationSid,
+        WinNetworkServiceSid, WinNetworkSid, WinNewEnterpriseReadonlyControllersSid,
+        WinNonCacheablePrincipalsGroupSid, WinNtAuthoritySid, WinNullSid, WinOtherOrganizationSid,
+        WinProxySid, WinRemoteLogonIdSid, WinRestrictedCodeSid, WinSChannelAuthenticationSid,
+        WinSelfSid, WinServiceSid, WinSystemLabelSid, WinTerminalServerSid,
+        WinThisOrganizationCertificateSid, WinThisOrganizationSid, WinUntrustedLabelSid,
+        WinUserModeDriversSid, WinWorldSid, WinWriteRestrictedCodeSid,
     },
 };
 
@@ -271,75 +306,253 @@ impl Drop for SecurityInfo {
 
 /// Well-known security identifier (SID) types
 ///
-/// These correspond to the `WELL_KNOWN_SID_TYPE` enumeration from the Windows API.
-// TODO: check accuracy
+/// These correspond to the [`WELL_KNOWN_SID_TYPE`] enumeration from the Windows API.
+///
+/// [`WELL_KNOWN_SID_TYPE`]: https://learn.microsoft.com/en-us/windows/win32/api/winnt/ne-winnt-well_known_sid_type
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WellKnownSidType {
     /// Null SID
     Null = WinNullSid,
-    /// Everyone group (S-1-1-0)
+    /// Everyone group
     World = WinWorldSid,
-    /// Local users (S-1-2-0)
+    /// Local users
     Local = WinLocalSid,
-    /// Creator owner (S-1-3-0)
+    /// Creator owner
     CreatorOwner = WinCreatorOwnerSid,
-    /// Creator group (S-1-3-1)
+    /// Creator group
     CreatorGroup = WinCreatorGroupSid,
-    /// NT Authority (S-1-5)
+    /// Creator owner server
+    CreatorOwnerServerSid = WinCreatorOwnerServerSid,
+    /// Creator group server
+    CreatorGroupServerSid = WinCreatorGroupServerSid,
+    /// NT Authority
     NtAuthority = WinNtAuthoritySid,
-    /// Dialup users (S-1-5-1)
+    /// Dialup users
     Dialup = WinDialupSid,
-    /// Network users (S-1-5-2)
+    /// Network users
     Network = WinNetworkSid,
-    /// Batch process (S-1-5-3)
+    /// Batch process
     Batch = WinBatchSid,
-    /// Interactive users (S-1-5-4)
+    /// Interactive users
     Interactive = WinInteractiveSid,
-    /// Service accounts (S-1-5-6)
+    /// Service accounts
     Service = WinServiceSid,
-    /// Anonymous logon (S-1-5-7)
+    /// Anonymous logon
     Anonymous = WinAnonymousSid,
-    /// Proxy (S-1-5-8)
+    /// Proxy
     Proxy = WinProxySid,
-    /// Enterprise domain controllers (S-1-5-9)
+    /// Enterprise domain controllers
     EnterpriseDomainControllers = WinEnterpriseControllersSid,
-    /// Self (S-1-5-10)
+    /// Self
     Principal = WinSelfSid,
-    /// Authenticated users (S-1-5-11)
+    /// Authenticated users
     AuthenticatedUser = WinAuthenticatedUserSid,
-    /// Restricted code (S-1-5-12)
+    /// Restricted code
     RestrictedCode = WinRestrictedCodeSid,
-    /// Terminal server users (S-1-5-13)
+    /// Terminal server users
     TerminalServer = WinTerminalServerSid,
-    /// Remote interactive logon (S-1-5-14)
+    /// Remote interactive logon
     RemoteLogonId = WinRemoteLogonIdSid,
-    /// Local system (S-1-5-18)
+    /// Login IDs
+    LoginIds = WinLogonIdsSid,
+    /// Local system
     LocalSystem = WinLocalSystemSid,
-    /// Local service (S-1-5-19)
+    /// Local service
     LocalService = WinLocalServiceSid,
-    /// Network service (S-1-5-20)
+    /// Network service
     NetworkService = WinNetworkServiceSid,
-    /// Built-in domain (S-1-5-32)
+    /// Built-in domain
     BuiltinDomain = WinBuiltinDomainSid,
-    /// Built-in administrators (S-1-5-32-544)
+    /// Built-in administrators
     BuiltinAdministrators = WinBuiltinAdministratorsSid,
-    /// Built-in users (S-1-5-32-545)
+    /// Built-in users
     BuiltinUsers = WinBuiltinUsersSid,
-    /// Built-in guests (S-1-5-32-546)
+    /// Built-in guests
     BuiltinGuests = WinBuiltinGuestsSid,
-    /// Built-in power users (S-1-5-32-547)
+    /// Built-in power users
     BuiltinPowerUsers = WinBuiltinPowerUsersSid,
-    /// Built-in account operators (S-1-5-32-548)
+    /// Built-in account operators
     BuiltinAccountOperators = WinBuiltinAccountOperatorsSid,
-    /// Built-in system operators (S-1-5-32-549)
+    /// Built-in system operators
     BuiltinSystemOperators = WinBuiltinSystemOperatorsSid,
-    /// Built-in print operators (S-1-5-32-550)
+    /// Built-in print operators
     BuiltinPrintOperators = WinBuiltinPrintOperatorsSid,
-    /// Built-in backup operators (S-1-5-32-551)
+    /// Built-in backup operators
     BuiltinBackupOperators = WinBuiltinBackupOperatorsSid,
-    /// Built-in replicators (S-1-5-32-552)
+    /// Built-in replicators
     BuiltinReplicator = WinBuiltinReplicatorSid,
+    /// Built-in pre-Windows 2000 compatible access
+    BuiltinPreWindows2000CompatibleAccess = WinBuiltinPreWindows2000CompatibleAccessSid,
+    /// Built-in remote desktop users
+    BuiltinRemoteDesktopUsers = WinBuiltinRemoteDesktopUsersSid,
+    /// Built-in network configuration operators
+    BuiltinNetworkConfigurationOperators = WinBuiltinNetworkConfigurationOperatorsSid,
+    /// Account administrator
+    AccountAdministrator = WinAccountAdministratorSid,
+    /// Account guest
+    AccountGuest = WinAccountGuestSid,
+    /// Account Kerberos target
+    AccountKrbtgt = WinAccountKrbtgtSid,
+    /// Account domain administrators
+    AccountDomainAdmins = WinAccountDomainAdminsSid,
+    /// Account domain users
+    AccountDomainUsers = WinAccountDomainUsersSid,
+    /// Account domain guests
+    AccountDomainGuests = WinAccountDomainGuestsSid,
+    /// Account computers
+    AccountComputers = WinAccountComputersSid,
+    /// Account controllers
+    AccountControllers = WinAccountControllersSid,
+    /// Account certificate administrators
+    AccountCertAdmins = WinAccountCertAdminsSid,
+    // TODO: missing
+    /// Account enterprise administrators
+    AccountEnterpriseAdmins = WinAccountEnterpriseAdminsSid,
+    /// Account policy administrators
+    AccountPolicyAdmins = WinAccountPolicyAdminsSid,
+    /// Account RAS and IAS servers
+    AccountRasAndIasServers = WinAccountRasAndIasServersSid,
+    /// NTLM authentication
+    NtlmAuthentication = WinNTLMAuthenticationSid,
+    /// Digest authentication
+    DigestAuthentication = WinDigestAuthenticationSid,
+    /// SChannel authentication
+    SChannelAuthentication = WinSChannelAuthenticationSid,
+    /// This organization
+    ThisOrganization = WinThisOrganizationSid,
+    /// Other organization
+    OtherOrganization = WinOtherOrganizationSid,
+    /// Built-in incoming forest trust builders
+    BuiltinIncomingForestTrustBuilders = WinBuiltinIncomingForestTrustBuildersSid,
+    /// Built-in performance monitoring users
+    BuiltinPerfMonitoringUsers = WinBuiltinPerfMonitoringUsersSid,
+    /// Built-in performance logging users
+    BuiltinPerfLoggingUsers = WinBuiltinPerfLoggingUsersSid,
+    /// Built-in authorization access
+    BuiltinAuthorizationAccess = WinBuiltinAuthorizationAccessSid,
+    /// Built-in terminal server license servers
+    BuiltinTerminalServerLicenseServers = WinBuiltinTerminalServerLicenseServersSid,
+    /// Built-in DCOM users
+    BuiltinDcomUsers = WinBuiltinDCOMUsersSid,
+    /// Built-in IIS users
+    BuiltinIUsers = WinBuiltinIUsersSid,
+    /// IIS user
+    IUser = WinIUserSid,
+    /// Built-in crypto operators
+    BuiltinCryptoOperators = WinBuiltinCryptoOperatorsSid,
+    /// Untrusted label
+    UntrustedLabel = WinUntrustedLabelSid,
+    /// Low integrity label
+    LowLabel = WinLowLabelSid,
+    /// Medium integrity label
+    MediumLabel = WinMediumLabelSid,
+    /// High integrity label
+    HighLabel = WinHighLabelSid,
+    /// System integrity label
+    SystemLabel = WinSystemLabelSid,
+    /// Write restricted code
+    WriteRestrictedCode = WinWriteRestrictedCodeSid,
+    /// Creator owner rights
+    CreatorOwnerRights = WinCreatorOwnerRightsSid,
+    /// Cacheable principals group
+    CacheablePrincipalsGroup = WinCacheablePrincipalsGroupSid,
+    /// Non-cacheable principals group
+    NonCacheablePrincipalsGroup = WinNonCacheablePrincipalsGroupSid,
+    /// Enterprise read-only controllers
+    EnterpriseReadonlyControllers = WinEnterpriseReadonlyControllersSid,
+    /// Account read-only controllers
+    AccountReadonlyControllers = WinAccountReadonlyControllersSid,
+    /// Built-in event log readers
+    BuiltinEventLogReaders = WinBuiltinEventLogReadersGroup,
+    /// New enterprise read-only controllers
+    NewEnterpriseReadonlyControllers = WinNewEnterpriseReadonlyControllersSid,
+    /// Built-in certificate service DCOM access
+    BuiltinCertSvcDComAccess = WinBuiltinCertSvcDComAccessGroup,
+    /// Medium plus integrity label
+    MediumPlusLabel = WinMediumPlusLabelSid,
+    /// Local logon
+    LocalLogon = WinLocalLogonSid,
+    /// Console logon
+    ConsoleLogon = WinConsoleLogonSid,
+    /// This organization certificate
+    ThisOrganizationCertificate = WinThisOrganizationCertificateSid,
+    /// Application package authority
+    ApplicationPackageAuthority = WinApplicationPackageAuthoritySid,
+    /// Built-in any package
+    BuiltinAnyPackage = WinBuiltinAnyPackageSid,
+    /// Capability internet client
+    CapabilityInternetClient = WinCapabilityInternetClientSid,
+    /// Capability internet client server
+    CapabilityInternetClientServer = WinCapabilityInternetClientServerSid,
+    /// Capability private network client server
+    CapabilityPrivateNetworkClientServer = WinCapabilityPrivateNetworkClientServerSid,
+    /// Capability pictures library
+    CapabilityPicturesLibrary = WinCapabilityPicturesLibrarySid,
+    /// Capability videos library
+    CapabilityVideosLibrary = WinCapabilityVideosLibrarySid,
+    /// Capability music library
+    CapabilityMusicLibrary = WinCapabilityMusicLibrarySid,
+    /// Capability documents library
+    CapabilityDocumentsLibrary = WinCapabilityDocumentsLibrarySid,
+    /// Capability shared user certificates
+    CapabilitySharedUserCertificates = WinCapabilitySharedUserCertificatesSid,
+    /// Capability enterprise authentication
+    CapabilityEnterpriseAuthentication = WinCapabilityEnterpriseAuthenticationSid,
+    /// Capability removable storage
+    CapabilityRemovableStorage = WinCapabilityRemovableStorageSid,
+    /// RDS remote access servers
+    BuiltinRDSRemoteAccessServers = WinBuiltinRDSRemoteAccessServersSid,
+    /// RDS endpoint servers
+    BuiltinRDSEndpointServers = WinBuiltinRDSEndpointServersSid,
+    /// RDS management servers
+    BuiltinRDSManagementServers = WinBuiltinRDSManagementServersSid,
+    /// User-mode drivers
+    UserModeDrivers = WinUserModeDriversSid,
+    /// Built-in Hyper-V administrators
+    BuiltinHyperVAdmins = WinBuiltinHyperVAdminsSid,
+    /// Account cloneable controllers
+    AccountCloneableControllers = WinAccountCloneableControllersSid,
+    /// Built-in access control assistance operators
+    BuiltinAccessControlAssistanceOperators = WinBuiltinAccessControlAssistanceOperatorsSid,
+    /// Built-in remote management users
+    BuiltinRemoteManagementUsers = WinBuiltinRemoteManagementUsersSid,
+    /// Authentication authority asserted
+    AuthenticationAuthorityAsserted = WinAuthenticationAuthorityAssertedSid,
+    /// Authentication service asserted
+    AuthenticationServiceAsserted = WinAuthenticationServiceAssertedSid,
+    /// Local account
+    LocalAccount = WinLocalAccountSid,
+    /// Local account and administrator
+    LocalAccountAndAdministrator = WinLocalAccountAndAdministratorSid,
+    /// Account protected users
+    AccountProtectedUsers = WinAccountProtectedUsersSid,
+    /// Capability appointments
+    CapabilityAppointments = WinCapabilityAppointmentsSid,
+    /// Capability contacts
+    CapabilityContacts = WinCapabilityContactsSid,
+    /// Account default system managed
+    AccountDefaultSystemManaged = WinAccountDefaultSystemManagedSid,
+    /// Built-in default system managed group
+    BuiltinDefaultSystemManagedGroup = WinBuiltinDefaultSystemManagedGroupSid,
+    /// Built-in storage replica administrators
+    BuiltinStorageReplicaAdmins = WinBuiltinStorageReplicaAdminsSid,
+    /// Account key administrators
+    AccountKeyAdmins = WinAccountKeyAdminsSid,
+    /// Account enterprise key administrators
+    AccountEnterpriseKeyAdmins = WinAccountEnterpriseKeyAdminsSid,
+    /// Authentication key trust
+    AuthenticationKeyTrust = WinAuthenticationKeyTrustSid,
+    /// Authentication key property MFA
+    AuthenticationKeyPropertyMFA = WinAuthenticationKeyPropertyMFASid,
+    /// Authentication key property attestation
+    AuthenticationKeyPropertyAttestation = WinAuthenticationKeyPropertyAttestationSid,
+    /// Authentication fresh key authentication
+    AuthenticationFreshKeyAuth = WinAuthenticationFreshKeyAuthSid,
+    /// Built-in device owners
+    BuiltinDeviceOwners = WinBuiltinDeviceOwnersSid,
+    //BuiltinUserModeHardwareOperators = WinBuiltinUserModeHardwareOperatorsSid,
+    //BuiltinOpenSSHUsers = WinBuiltinOpenSSHUsersSid,
 }
 
 /// A security identifier (SID)
