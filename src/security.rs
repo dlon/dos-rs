@@ -31,7 +31,7 @@ use std::{
     ffi::{OsStr, c_void},
     io,
     ops::Deref,
-    os::windows::{ffi::OsStrExt, io::AsRawHandle},
+    os::windows::io::AsRawHandle,
     ptr,
 };
 use windows_sys::Win32::{
@@ -91,6 +91,8 @@ use windows_sys::Win32::{
         WinUserModeDriversSid, WinWorldSid, WinWriteRestrictedCodeSid,
     },
 };
+
+use crate::util::string_to_null_terminated_utf16;
 
 /// Object types for security operations
 #[repr(i32)]
@@ -211,11 +213,7 @@ impl SecurityInfo {
         object_type: ObjectType,
         info: SecurityInformation,
     ) -> io::Result<SecurityInfo> {
-        let name_wide: Vec<u16> = name
-            .as_ref()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
+        let name_wide: Vec<u16> = string_to_null_terminated_utf16(name);
 
         Self::new_inner(|owner_ptr, group_ptr, dacl_ptr, sacl_ptr, sd_ptr| {
             // SAFETY: `name_wide` is a valid null-terminated wide string, as are all pointers

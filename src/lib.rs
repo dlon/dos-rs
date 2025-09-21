@@ -148,5 +148,10 @@ pub mod string;
 #[cfg(feature = "sys")]
 pub mod sys;
 
-#[cfg(any(feature = "process", feature = "string"))]
+#[cfg(any(
+    feature = "process",
+    feature = "string",
+    feature = "net",
+    feature = "security"
+))]
 mod util;

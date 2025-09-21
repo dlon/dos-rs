@@ -1,4 +1,7 @@
-use std::{ffi::OsString, os::windows::ffi::OsStringExt};
+use std::{
+    ffi::{OsStr, OsString},
+    os::windows::ffi::{OsStrExt, OsStringExt},
+};
 
 #[macro_export]
 macro_rules! define_int_enum {
@@ -66,4 +69,12 @@ pub unsafe fn osstring_from_wide_with_len(s: *const u16, len: usize) -> OsString
     // SAFETY: `s` is initialized
     let slice = unsafe { std::slice::from_raw_parts(s, len) };
     OsString::from_wide(slice)
+}
+
+/// Convert `s` into a null-terminated wide string.
+pub fn string_to_null_terminated_utf16<T: FromIterator<u16>>(s: impl AsRef<OsStr>) -> T {
+    s.as_ref()
+        .encode_wide()
+        .chain(std::iter::once(0u16))
+        .collect()
 }

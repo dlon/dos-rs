@@ -9,7 +9,7 @@
 //!
 //! for address in get_unicast_ip_address_table(None)? {
 //!     println!("Interface Index: {}", address.interface_index());
-//!     println!("Interface LUID: {:#x}", address.interface_luid());
+//!     println!("Interface LUID: {:#x}", *address.interface_luid());
 //!     println!("Address Family: {:?}", address.family());
 //!     println!("IP Address: {:?}", address.address());
 //! }
@@ -17,11 +17,11 @@
 //! ```
 
 use std::{
-    ffi::c_void,
+    ffi::{OsStr, OsString, c_void},
     io, mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     ops::Deref,
-    os::windows::io::RawHandle,
+    os::windows::{ffi::OsStringExt, io::RawHandle},
     ptr,
     sync::Mutex,
 };
@@ -29,15 +29,20 @@ use windows_sys::Win32::{
     Foundation::{ERROR_SUCCESS, NO_ERROR},
     NetworkManagement::{
         IpHelper::{
-            CancelMibChangeNotify2, FreeMibTable, GetIpInterfaceEntry, GetUnicastIpAddressTable,
-            MIB_IPINTERFACE_ROW, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE,
-            MibAddInstance, MibDeleteInstance, MibInitialNotification, MibParameterNotification,
+            CancelMibChangeNotify2, ConvertInterfaceAliasToLuid, ConvertInterfaceLuidToAlias,
+            ConvertInterfaceLuidToGuid, ConvertInterfaceLuidToIndex, FreeMibTable,
+            GetIpInterfaceEntry, GetUnicastIpAddressTable, MIB_IPINTERFACE_ROW,
+            MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, MibAddInstance,
+            MibDeleteInstance, MibInitialNotification, MibParameterNotification,
             NotifyIpInterfaceChange, SetIpInterfaceEntry,
         },
-        Ndis::NET_LUID_LH,
+        Ndis::{IF_MAX_STRING_SIZE, NET_LUID_LH},
     },
     Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC},
 };
+use windows_sys::core::GUID;
+
+use crate::util::string_to_null_terminated_utf16;
 
 /// Address family for IP addresses
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -60,9 +65,11 @@ impl TryFrom<u16> for AddressFamily {
     }
 }
 
-/// A LUID (Locally Unique Identifier) for a network interface
+/// A LUID (locally unique identifier) for a network interface
 ///
-/// Can be created from or converted to a `u64` or `NET_LUID_LH`.
+/// Can be created from or converted to a `u64` or [`NET_LUID_LH`].
+///
+/// [`NET_LUID_LH`]: https://learn.microsoft.com/en-us/windows-hardware/drivers/network/net-luid-value
 #[repr(transparent)]
 pub struct Luid(u64);
 
@@ -118,6 +125,40 @@ impl From<Luid> for NET_LUID_LH {
         NET_LUID_LH { Value: luid.0 }
     }
 }
+
+/// A GUID (global unique identifier) for a network interface
+///
+/// Can be created from or converted to a `u128` or [`GUID`].
+///
+/// [`GUID`]: https://learn.microsoft.com/en-us/windows/win32/api/guiddef/ns-guiddef-guid
+pub struct Guid(GUID);
+
+impl From<GUID> for Guid {
+    fn from(guid: GUID) -> Self {
+        Guid(guid)
+    }
+}
+
+impl From<u128> for Guid {
+    fn from(guid: u128) -> Self {
+        Guid(GUID::from_u128(guid))
+    }
+}
+
+impl From<Guid> for GUID {
+    fn from(value: Guid) -> Self {
+        value.0
+    }
+}
+
+// Ensure Guid, GUID, and u128 have the same layout
+const _: () = {
+    assert!(mem::size_of::<Guid>() == mem::size_of::<GUID>());
+    assert!(mem::align_of::<Guid>() == mem::align_of::<GUID>());
+    assert!(mem::size_of::<Guid>() == mem::size_of::<u128>());
+    // NOTE: alignment differs:
+    //assert!(mem::align_of::<Guid>() == mem::align_of::<u128>());
+};
 
 /// Retrieve the unicast IP address table for a specific address family
 ///
@@ -578,6 +619,77 @@ unsafe extern "system" fn notify_ip_interface_change_callback(
         }
         other => unreachable!("invalid notification type: {other}"),
     }
+}
+
+/// Return the network interface index given its [Luid].
+///
+/// This uses the [`ConvertInterfaceLuidToIndex`] Windows API function.
+///
+/// [`ConvertInterfaceLuidToIndex`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfaceluidtoindex
+pub fn convert_interface_luid_to_index(luid: impl Into<Luid>) -> io::Result<u32> {
+    let mut index = 0u32;
+    let luid = luid.into();
+
+    // SAFETY: `index` is valid to be written to
+    let status = unsafe { ConvertInterfaceLuidToIndex(luid.as_ref(), &mut index) };
+    if status != NO_ERROR {
+        return Err(io::Error::from_raw_os_error(status as i32));
+    }
+
+    Ok(index)
+}
+
+/// Return the [Guid] of a network interface given its [Luid].
+///
+/// This uses the [`ConvertInterfaceLuidToGuid`] Windows API function.
+///
+/// [`ConvertInterfaceLuidToGuid`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfaceluidtoguid
+pub fn convert_interface_luid_to_guid(luid: impl Into<Luid>) -> io::Result<Guid> {
+    let mut guid = GUID::default();
+    let luid = luid.into();
+
+    // SAFETY: `guid` is a valid pointer to a GUID
+    let status = unsafe { ConvertInterfaceLuidToGuid(luid.as_ref(), &mut guid) };
+    if status != NO_ERROR {
+        return Err(io::Error::from_raw_os_error(status as i32));
+    }
+
+    Ok(guid.into())
+}
+
+/// Return the [Luid] of a network interface given its alias.
+///
+/// This uses the [`ConvertInterfaceAliasToLuid`] Windows API function.
+///
+/// [`ConvertInterfaceAliasToLuid`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfacealiastoluid
+pub fn convert_interface_alias_to_luid<T: AsRef<OsStr>>(alias: T) -> io::Result<Luid> {
+    let alias_wide: Vec<u16> = string_to_null_terminated_utf16(alias);
+    let mut luid = NET_LUID_LH::default();
+
+    // SAFETY: `alias_wide` is a valid null-terminated wide string, and `luid` is a valid buffer
+    let status = unsafe { ConvertInterfaceAliasToLuid(alias_wide.as_ptr(), &mut luid) };
+    if status != NO_ERROR {
+        return Err(io::Error::from_raw_os_error(status as i32));
+    }
+
+    Ok(luid.into())
+}
+
+/// Return the alias of a network interface given its [Luid].
+///
+/// This uses the [`ConvertInterfaceLuidToAlias`] Windows API function.
+///
+/// [`ConvertInterfaceLuidToAlias`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfaceluidtoalias
+pub fn convert_interface_luid_to_alias(luid: &NET_LUID_LH) -> io::Result<OsString> {
+    let mut buffer = [0u16; IF_MAX_STRING_SIZE as usize + 1];
+
+    let status = unsafe { ConvertInterfaceLuidToAlias(luid, buffer.as_mut_ptr(), buffer.len()) };
+    if status != NO_ERROR {
+        return Err(io::Error::from_raw_os_error(status as i32));
+    }
+
+    let nul = buffer.iter().position(|&c| c == 0u16).unwrap();
+    Ok(OsString::from_wide(&buffer[0..nul]))
 }
 
 #[cfg(test)]
