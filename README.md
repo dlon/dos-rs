@@ -67,6 +67,14 @@ for address in get_unicast_ip_address_table(None)? {
 }
 ```
 
+Get the alias of a network interface using its LUID:
+
+```rust
+use dos::net::convert_interface_luid_to_alias;
+let my_luid = 1234;
+let alias = convert_interface_luid_to_alias(my_luid)?;
+```
+
 ### Security
 
 Get a security descriptor for a file:

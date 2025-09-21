@@ -73,6 +73,18 @@
 //! # Ok::<(), std::io::Error>(())
 //! ```
 //!
+//! Get the alias of a network interface using its LUID:
+//!
+//! ```no_run
+//! # #[cfg(feature = "net")]
+//! # {
+//! use dos::net::convert_interface_luid_to_alias;
+//! let my_luid = 1234;
+//! let alias = convert_interface_luid_to_alias(my_luid)?;
+//! # }
+//! # Ok::<(), std::io::Error>(())
+//! ```
+//!
 //! ## Security
 //!
 //! Get a security descriptor for a file:
