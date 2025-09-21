@@ -417,9 +417,9 @@ impl From<&NotificationType<'_>> for i32 {
 }
 
 /// Callback for `notify_ip_interface_change`
-pub trait NotifyIpInterfaceChangeCb: FnMut(NotificationType<'_>) {}
+pub trait IpInterfaceChangeCb: FnMut(NotificationType<'_>) + Send {}
 
-impl<T: FnMut(NotificationType<'_>)> NotifyIpInterfaceChangeCb for T {}
+impl<T: FnMut(NotificationType<'_>) + Send> IpInterfaceChangeCb for T {}
 
 /// Registers a callback function that is invoked when an interface is added, removed, or changed.
 ///
@@ -443,11 +443,11 @@ impl<T: FnMut(NotificationType<'_>)> NotifyIpInterfaceChangeCb for T {}
 /// its internal state behind a mutex.
 ///
 /// [`NotifyIpInterfaceChange`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyipinterfacechange
-pub fn notify_ip_interface_change<'a, T: NotifyIpInterfaceChangeCb + Send + 'a>(
+pub fn notify_ip_interface_change(
     family: Option<AddressFamily>,
-    callback: T,
+    callback: impl IpInterfaceChangeCb + 'static,
     initial_notification: bool,
-) -> io::Result<Box<IpInterfaceChangeHandle<'a>>> {
+) -> io::Result<Box<IpInterfaceChangeHandle>> {
     let mut context = Box::new(IpInterfaceChangeHandle {
         callback: Mutex::new(Box::new(callback)),
         handle: ptr::null_mut(),
@@ -472,14 +472,14 @@ pub fn notify_ip_interface_change<'a, T: NotifyIpInterfaceChangeCb + Send + 'a>(
 
 /// Handle returned by `notify_ip_interface_change`. When dropped, the callback is unregistered
 /// and monitoring stops.
-pub struct IpInterfaceChangeHandle<'a> {
-    callback: Mutex<Box<dyn NotifyIpInterfaceChangeCb + Send + 'a>>,
+pub struct IpInterfaceChangeHandle {
+    callback: Mutex<Box<dyn IpInterfaceChangeCb>>,
     handle: RawHandle,
 }
 
-unsafe impl Send for IpInterfaceChangeHandle<'_> {}
+unsafe impl Send for IpInterfaceChangeHandle {}
 
-impl Drop for IpInterfaceChangeHandle<'_> {
+impl Drop for IpInterfaceChangeHandle {
     fn drop(&mut self) {
         // SAFETY: handle is valid
         unsafe { CancelMibChangeNotify2(self.handle) };
