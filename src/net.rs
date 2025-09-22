@@ -478,11 +478,11 @@ impl IpInterfaceRowModifier {
         let prev_prefix_len = self.row.SitePrefixLength;
         self.row.SitePrefixLength = 0;
 
-        set_ip_interface_entry(&self)?;
+        let result = set_ip_interface_entry(&self);
 
         self.row.SitePrefixLength = prev_prefix_len;
 
-        Ok(())
+        result
     }
 }
 
