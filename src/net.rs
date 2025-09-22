@@ -590,7 +590,7 @@ pub fn notify_ip_interface_change(
     };
 
     if status != ERROR_SUCCESS {
-        return Err(io::Error::last_os_error());
+        return Err(io::Error::from_raw_os_error(status as i32));
     }
 
     Ok(context)
