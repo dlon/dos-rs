@@ -533,12 +533,40 @@ impl<T: FnMut(NotificationType<'_>) + Send> IpInterfaceChangeCb for T {}
 /// - `initial_notification`: Whether to immediately invoke the callback to confirm
 ///   registration of callback.
 ///
+/// # Example
+///
+/// ```no_run
+/// use dos::net::{notify_ip_interface_change, NotificationType};
+/// use std::{thread, time::Duration};
+///
+/// // Register for interface change notifications
+/// let _handle = notify_ip_interface_change(
+///     None,
+///     |notification_type| {
+///         match notification_type {
+///             NotificationType::InitialNotification => {
+///                 println!("Monitoring started");
+///             }
+///             NotificationType::AddInstance(interface) => {
+///                 println!("Interface added: Family {:?}", interface.family());
+///             }
+///             NotificationType::DeleteInstance(interface) => {
+///                 println!("Interface removed: Family {:?}", interface.family());
+///             }
+///             NotificationType::ParameterNotification(interface) => {
+///                 println!("Interface changed: Family {:?}", interface.family());
+///             }
+///         }
+///     },
+///     true, // Request initial notification
+/// )?;
+///
+/// # Ok::<(), std::io::Error>(())
+/// ```
+///
 /// # Safety
 ///
 /// The callback must be Send, as it may be called from another thread.
-///
-/// `NotifyIpInterfaceChange` serializes calls, but not for different families, so it must also hide
-/// its internal state behind a mutex.
 ///
 /// [`NotifyIpInterfaceChange`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyipinterfacechange
 pub fn notify_ip_interface_change(
