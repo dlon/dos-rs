@@ -779,13 +779,7 @@ bitflags! {
 /// for adapter in &adapters {
 ///     println!("Adapter: {}", adapter.friendly_name().to_string_lossy());
 ///     println!("  Description: {}", adapter.description().to_string_lossy());
-///     println!("  Interface Index: {}", adapter.interface_index());
 ///     println!("  MTU: {}", adapter.mtu());
-///     
-///     let mac = adapter.physical_address();
-///     if !mac.is_empty() {
-///         println!("  MAC: {:02x?}", mac);
-///     }
 /// }
 /// # Ok::<(), std::io::Error>(())
 /// ```
