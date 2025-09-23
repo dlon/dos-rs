@@ -16,6 +16,7 @@
 //! # Ok::<(), std::io::Error>(())
 //! ```
 
+use bitflags::bitflags;
 use std::{
     ffi::{OsStr, OsString, c_void},
     io, mem,
@@ -26,15 +27,19 @@ use std::{
     sync::Mutex,
 };
 use windows_sys::Win32::{
-    Foundation::{ERROR_SUCCESS, NO_ERROR},
+    Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS, NO_ERROR},
     NetworkManagement::{
         IpHelper::{
             CancelMibChangeNotify2, ConvertInterfaceAliasToLuid, ConvertInterfaceLuidToAlias,
             ConvertInterfaceLuidToGuid, ConvertInterfaceLuidToIndex, FreeMibTable,
-            GetIpInterfaceEntry, GetUnicastIpAddressTable, MIB_IPINTERFACE_ROW,
-            MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, MibAddInstance,
-            MibDeleteInstance, MibInitialNotification, MibParameterNotification,
-            NotifyIpInterfaceChange, SetIpInterfaceEntry,
+            GAA_FLAG_INCLUDE_ALL_COMPARTMENTS, GAA_FLAG_INCLUDE_ALL_INTERFACES,
+            GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_INCLUDE_PREFIX,
+            GAA_FLAG_INCLUDE_TUNNEL_BINDINGORDER, GAA_FLAG_INCLUDE_WINS_INFO,
+            GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST,
+            GetAdaptersAddresses, GetIpInterfaceEntry, GetUnicastIpAddressTable,
+            IP_ADAPTER_ADDRESSES_LH, MIB_IPINTERFACE_ROW, MIB_UNICASTIPADDRESS_ROW,
+            MIB_UNICASTIPADDRESS_TABLE, MibAddInstance, MibDeleteInstance, MibInitialNotification,
+            MibParameterNotification, NotifyIpInterfaceChange, SetIpInterfaceEntry,
         },
         Ndis::{IF_MAX_STRING_SIZE, NET_LUID_LH},
     },
@@ -720,6 +725,223 @@ pub fn convert_interface_luid_to_alias(luid: impl Into<Luid>) -> io::Result<OsSt
 
     let nul = buffer.iter().position(|&c| c == 0u16).unwrap();
     Ok(OsString::from_wide(&buffer[0..nul]))
+}
+
+bitflags! {
+    /// Flags for [`get_adapters_addresses`] specifying what information to include.
+    ///
+    /// These correspond to the `GAA_FLAG_*` constants from the Windows API.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct AdapterAddressFlags: u32 {
+        // TODO: missing flags
+        /// Include prefix information for IP addresses
+        const INCLUDE_PREFIX = GAA_FLAG_INCLUDE_PREFIX;
+        /// Skip anycast addresses
+        const SKIP_ANYCAST = GAA_FLAG_SKIP_ANYCAST;
+        /// Skip multicast addresses
+        const SKIP_MULTICAST = GAA_FLAG_SKIP_MULTICAST;
+        /// Skip DNS server addresses
+        const SKIP_DNS_SERVER = GAA_FLAG_SKIP_DNS_SERVER;
+        /// Include WINS server information
+        const INCLUDE_WINS_INFO = GAA_FLAG_INCLUDE_WINS_INFO;
+        /// Include gateway addresses
+        const INCLUDE_GATEWAYS = GAA_FLAG_INCLUDE_GATEWAYS;
+        /// Include all interfaces, even those not bound to specified address family
+        const INCLUDE_ALL_INTERFACES = GAA_FLAG_INCLUDE_ALL_INTERFACES;
+        /// Include all network compartments
+        const INCLUDE_ALL_COMPARTMENTS = GAA_FLAG_INCLUDE_ALL_COMPARTMENTS;
+        /// Include tunnel binding order
+        const INCLUDE_TUNNEL_BINDINGORDER = GAA_FLAG_INCLUDE_TUNNEL_BINDINGORDER;
+    }
+}
+
+/// Retrieve the addresses associated with the adapters on the local computer.
+///
+/// This function calls the Windows [`GetAdaptersAddresses`] API to get detailed information
+/// about network adapters, including their addresses, names, and configuration.
+///
+/// # Arguments
+///
+/// * `family` - The address family to retrieve. If `None`, both IPv4 and IPv6 are retrieved.
+/// * `flags` - Flags that control what information is retrieved.
+///
+/// # Returns
+///
+/// Returns an [`AdapterAddressTable`] containing all the adapter information.
+///
+/// # Example
+///
+/// ```no_run
+/// use dos::net::{get_adapters_addresses, AdapterAddressFlags};
+///
+/// // Get all adapters with basic information
+/// let adapters = get_adapters_addresses(None, AdapterAddressFlags::empty())?;
+/// for adapter in &adapters {
+///     println!("Adapter: {}", adapter.friendly_name().to_string_lossy());
+///     println!("  Description: {}", adapter.description().to_string_lossy());
+///     println!("  Interface Index: {}", adapter.interface_index());
+///     println!("  MTU: {}", adapter.mtu());
+///     
+///     let mac = adapter.physical_address();
+///     if !mac.is_empty() {
+///         println!("  MAC: {:02x?}", mac);
+///     }
+/// }
+/// # Ok::<(), std::io::Error>(())
+/// ```
+///
+/// [`GetAdaptersAddresses`]: https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getadaptersaddresses
+pub fn get_adapters_addresses(
+    family: Option<AddressFamily>,
+    flags: AdapterAddressFlags,
+) -> io::Result<AdapterAddressTable> {
+    let family = family.map(|f| f as u16).unwrap_or(AF_UNSPEC);
+    let mut size: u32 = 15 * 1024;
+    let mut buffer = vec![0u8; size as usize];
+
+    loop {
+        // SAFETY: `buffer` is valid and `size` is the size of the buffer
+        let result = unsafe {
+            GetAdaptersAddresses(
+                u32::from(family),
+                flags.bits(),
+                ptr::null_mut(),
+                buffer.as_mut_ptr() as *mut _,
+                &mut size,
+            )
+        };
+
+        if result == ERROR_BUFFER_OVERFLOW {
+            buffer.resize(size as usize, 0);
+            continue;
+        }
+        if result != NO_ERROR {
+            return Err(io::Error::from_raw_os_error(result as i32));
+        }
+
+        break;
+    }
+
+    // Resize buffer to actual used size
+    buffer.truncate(size as usize);
+
+    Ok(AdapterAddressTable { buffer })
+}
+
+/// A collection of network adapter information retrieved from [`GetAdaptersAddresses`].
+///
+/// This struct owns the raw data returned by the Windows API and provides an iterator
+/// over the adapter entries.
+///
+/// [`GetAdaptersAddresses`]: https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getadaptersaddresses
+pub struct AdapterAddressTable {
+    buffer: Vec<u8>,
+}
+
+impl AdapterAddressTable {
+    /// Return an iterator over the adapter addresses in this table
+    pub fn iter(&self) -> AdapterAddressIterator<'_> {
+        AdapterAddressIterator {
+            current: if self.buffer.is_empty() {
+                ptr::null()
+            } else {
+                self.buffer.as_ptr() as *const IP_ADAPTER_ADDRESSES_LH
+            },
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a AdapterAddressTable {
+    type Item = AdapterAddress<'a>;
+    type IntoIter = AdapterAddressIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+/// Iterator over adapter addresses in an [`AdapterAddressTable`]
+pub struct AdapterAddressIterator<'a> {
+    current: *const IP_ADAPTER_ADDRESSES_LH,
+    _phantom: std::marker::PhantomData<&'a IP_ADAPTER_ADDRESSES_LH>,
+}
+
+impl<'a> Iterator for AdapterAddressIterator<'a> {
+    type Item = AdapterAddress<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current.is_null() {
+            return None;
+        }
+
+        // SAFETY: current is valid and points to an IP_ADAPTER_ADDRESSES_LH structure
+        let adapter = unsafe { &*self.current };
+        let result = AdapterAddress { raw: adapter };
+
+        // Move to the next adapter
+        self.current = adapter.Next;
+
+        Some(result)
+    }
+}
+
+/// A single network adapter address entry from [`AdapterAddressTable`]
+///
+/// This corresponds to an [`IP_ADAPTER_ADDRESSES_LH`] structure from the Windows API.
+///
+/// [`IP_ADAPTER_ADDRESSES_LH`]: https://learn.microsoft.com/en-us/windows/win32/api/iptypes/ns-iptypes-ip_adapter_addresses_lh
+pub struct AdapterAddress<'a> {
+    raw: &'a IP_ADAPTER_ADDRESSES_LH,
+}
+
+impl<'a> AdapterAddress<'a> {
+    /// Get the adapter name
+    ///
+    /// This corresponds to the `AdapterName` field in `IP_ADAPTER_ADDRESSES_LH`.
+    pub fn adapter_name(&self) -> &str {
+        // SAFETY: AdapterName is a null-terminated string
+        unsafe {
+            std::ffi::CStr::from_ptr(self.raw.AdapterName as *const i8)
+                .to_str()
+                .unwrap_or("<invalid>")
+        }
+    }
+
+    /// Get the friendly name of the adapter
+    ///
+    /// This corresponds to the `FriendlyName` field in `IP_ADAPTER_ADDRESSES_LH`.
+    pub fn friendly_name(&self) -> OsString {
+        // SAFETY: FriendlyName is a null-terminated wide string
+        unsafe { crate::util::osstring_from_wide(self.raw.FriendlyName) }
+    }
+
+    /// Get the description of the adapter
+    ///
+    /// This corresponds to the `Description` field in `IP_ADAPTER_ADDRESSES_LH`.
+    pub fn description(&self) -> OsString {
+        // SAFETY: Description is a null-terminated wide string
+        unsafe { crate::util::osstring_from_wide(self.raw.Description) }
+    }
+
+    /// Get the adapter interface LUID
+    ///
+    /// This corresponds to the `Luid` field in `IP_ADAPTER_ADDRESSES_LH`.
+    pub fn interface_luid(&self) -> Luid {
+        self.raw.Luid.into()
+    }
+
+    /// Get the MTU size for this adapter
+    ///
+    /// This corresponds to the `Mtu` field in `IP_ADAPTER_ADDRESSES_LH`.
+    pub fn mtu(&self) -> u32 {
+        self.raw.Mtu
+    }
+
+    /// Get the raw adapter addresses structure
+    pub fn as_raw(&self) -> &IP_ADAPTER_ADDRESSES_LH {
+        self.raw
+    }
 }
 
 #[cfg(test)]
