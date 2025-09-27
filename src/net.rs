@@ -427,6 +427,12 @@ impl IpInterfaceRow {
     }
 }
 
+impl<'a> From<&'a MIB_IPINTERFACE_ROW> for &'a IpInterfaceRow {
+    fn from(row: &'a MIB_IPINTERFACE_ROW) -> Self {
+        IpInterfaceRow::new(row)
+    }
+}
+
 impl AsRef<MIB_IPINTERFACE_ROW> for IpInterfaceRow {
     fn as_ref(&self) -> &MIB_IPINTERFACE_ROW {
         &self.row
@@ -497,19 +503,22 @@ impl AsRef<MIB_IPINTERFACE_ROW> for IpInterfaceRowModifier {
     }
 }
 
-pub enum NotificationType<'a> {
+/// Notification type for change callbacks
+///
+/// Corresponds to `MIB_NOTIFICATION_TYPE` in the Windows API.
+pub enum NotificationType<'a, T> {
     /// A parameter of an existing instance has changed.
-    ParameterNotification(&'a IpInterfaceRow),
+    ParameterNotification(&'a T),
     /// A new instance has been added.
-    AddInstance(&'a IpInterfaceRow),
+    AddInstance(&'a T),
     /// An existing instance has been deleted.
-    DeleteInstance(&'a IpInterfaceRow),
+    DeleteInstance(&'a T),
     /// Initial notification to confirm registration of callback.
     InitialNotification,
 }
 
-impl From<&NotificationType<'_>> for i32 {
-    fn from(nt: &NotificationType<'_>) -> Self {
+impl<T> From<&NotificationType<'_, T>> for i32 {
+    fn from(nt: &NotificationType<'_, T>) -> Self {
         match nt {
             NotificationType::ParameterNotification(_) => MibParameterNotification,
             NotificationType::AddInstance(_) => MibAddInstance,
@@ -519,10 +528,10 @@ impl From<&NotificationType<'_>> for i32 {
     }
 }
 
-/// Callback for `notify_ip_interface_change`
-pub trait IpInterfaceChangeCb: FnMut(NotificationType<'_>) + Send {}
+/// Callback for `notify_*` functions
+pub trait NotificationCb<T>: FnMut(NotificationType<'_, T>) + Send {}
 
-impl<T: FnMut(NotificationType<'_>) + Send> IpInterfaceChangeCb for T {}
+impl<T, F: FnMut(NotificationType<'_, T>) + Send> NotificationCb<T> for F {}
 
 /// Registers a callback function that is invoked when an interface is added, removed, or changed.
 ///
@@ -576,10 +585,10 @@ impl<T: FnMut(NotificationType<'_>) + Send> IpInterfaceChangeCb for T {}
 /// [`NotifyIpInterfaceChange`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyipinterfacechange
 pub fn notify_ip_interface_change(
     family: Option<AddressFamily>,
-    callback: impl IpInterfaceChangeCb + 'static,
+    callback: impl NotificationCb<IpInterfaceRow> + 'static,
     initial_notification: bool,
-) -> io::Result<Box<IpInterfaceChangeHandle>> {
-    let mut context = Box::new(IpInterfaceChangeHandle {
+) -> io::Result<Box<NotifyCallbackHandle<IpInterfaceRow>>> {
+    let mut context = Box::new(NotifyCallbackHandle {
         callback: Mutex::new(Box::new(callback)),
         handle: ptr::null_mut(),
     });
@@ -587,7 +596,7 @@ pub fn notify_ip_interface_change(
     let status = unsafe {
         NotifyIpInterfaceChange(
             family.map(|f| f as u16).unwrap_or(AF_UNSPEC),
-            Some(notify_ip_interface_change_callback),
+            Some(notify_callback::<MIB_IPINTERFACE_ROW, IpInterfaceRow>),
             &mut *context.as_mut() as *mut _ as *mut _,
             initial_notification,
             (&mut context.handle) as *mut _,
@@ -603,14 +612,14 @@ pub fn notify_ip_interface_change(
 
 /// Handle returned by `notify_ip_interface_change`. When dropped, the callback is unregistered
 /// and monitoring stops.
-pub struct IpInterfaceChangeHandle {
-    callback: Mutex<Box<dyn IpInterfaceChangeCb>>,
+pub struct NotifyCallbackHandle<T> {
+    callback: Mutex<Box<dyn NotificationCb<T>>>,
     handle: RawHandle,
 }
 
-unsafe impl Send for IpInterfaceChangeHandle {}
+unsafe impl<T> Send for NotifyCallbackHandle<T> {}
 
-impl Drop for IpInterfaceChangeHandle {
+impl<T> Drop for NotifyCallbackHandle<T> {
     fn drop(&mut self) {
         // SAFETY: handle is valid
         unsafe { CancelMibChangeNotify2(self.handle) };
@@ -618,17 +627,19 @@ impl Drop for IpInterfaceChangeHandle {
 }
 
 #[allow(non_upper_case_globals)]
-unsafe extern "system" fn notify_ip_interface_change_callback(
+unsafe extern "system" fn notify_callback<'a, UnderlyingType: 'a, WrappedType: 'a>(
     context: *const c_void,
-    row: *const MIB_IPINTERFACE_ROW,
+    row: *const UnderlyingType,
     notification_type: i32,
-) {
+) where
+    &'a WrappedType: From<&'a UnderlyingType>,
+{
     if context.is_null() {
         return;
     }
 
     // SAFETY: context and row are valid pointers
-    let context = unsafe { &*(context as *mut IpInterfaceChangeHandle) };
+    let context = unsafe { &*(context as *mut NotifyCallbackHandle<WrappedType>) };
     let mut callback = context.callback.lock().unwrap();
 
     if notification_type == MibInitialNotification {
@@ -637,18 +648,18 @@ unsafe extern "system" fn notify_ip_interface_change_callback(
     }
 
     // SAFETY: `row` is never null for any other notification type
-    let row = unsafe { &*row };
-    let ip_row = IpInterfaceRow::new(row);
+    let raw = unsafe { &*row };
+    let converted: &WrappedType = <&WrappedType>::from(raw);
 
     match notification_type {
         MibParameterNotification => {
-            (callback)(NotificationType::ParameterNotification(ip_row));
+            (callback)(NotificationType::ParameterNotification(converted));
         }
         MibAddInstance => {
-            (callback)(NotificationType::AddInstance(ip_row));
+            (callback)(NotificationType::AddInstance(converted));
         }
         MibDeleteInstance => {
-            (callback)(NotificationType::DeleteInstance(ip_row));
+            (callback)(NotificationType::DeleteInstance(converted));
         }
         other => unreachable!("invalid notification type: {other}"),
     }
