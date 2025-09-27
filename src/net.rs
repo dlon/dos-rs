@@ -37,9 +37,10 @@ use windows_sys::Win32::{
             GAA_FLAG_INCLUDE_TUNNEL_BINDINGORDER, GAA_FLAG_INCLUDE_WINS_INFO,
             GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST,
             GetAdaptersAddresses, GetIpInterfaceEntry, GetUnicastIpAddressTable,
-            IP_ADAPTER_ADDRESSES_LH, MIB_IPINTERFACE_ROW, MIB_UNICASTIPADDRESS_ROW,
-            MIB_UNICASTIPADDRESS_TABLE, MibAddInstance, MibDeleteInstance, MibInitialNotification,
-            MibParameterNotification, NotifyIpInterfaceChange, SetIpInterfaceEntry,
+            IP_ADAPTER_ADDRESSES_LH, MIB_IPFORWARD_ROW2, MIB_IPINTERFACE_ROW,
+            MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, MibAddInstance,
+            MibDeleteInstance, MibInitialNotification, MibParameterNotification,
+            NotifyIpInterfaceChange, NotifyRouteChange2, SetIpInterfaceEntry,
         },
         Ndis::{IF_MAX_STRING_SIZE, NET_LUID_LH},
     },
@@ -503,6 +504,116 @@ impl AsRef<MIB_IPINTERFACE_ROW> for IpInterfaceRowModifier {
     }
 }
 
+/// A single IP route entry in the system routing table.
+///
+/// This is a wrapper around [`MIB_IPFORWARD_ROW2`].
+///
+/// [`MIB_IPFORWARD_ROW2`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_ipforward_row2
+#[repr(transparent)]
+pub struct RouteRow {
+    row: MIB_IPFORWARD_ROW2,
+}
+
+impl RouteRow {
+    /// Create a new `RouteRow` from a raw `row`, without taking ownership
+    pub fn new(row: &MIB_IPFORWARD_ROW2) -> &Self {
+        let pprows = row as *const MIB_IPFORWARD_ROW2;
+        // SAFETY: row is a valid row, and we preserve its lifetime
+        // Since `RouteRow` is transparent, we may simply cast it
+        unsafe { &*(pprows.cast()) }
+    }
+
+    /// Get the destination prefix for this route, as (address, prefix length)
+    ///
+    /// Return `None` if the address family is not recognized.
+    pub fn destination_prefix(&self) -> (IpAddr, u8) {
+        // SAFETY: The union is valid
+        let dest = unsafe {
+            match self.row.DestinationPrefix.Prefix.si_family {
+                AF_INET => {
+                    let addr = self.row.DestinationPrefix.Prefix.Ipv4.sin_addr.S_un.S_addr;
+                    IpAddr::V4(Ipv4Addr::from(u32::from_be(addr)))
+                }
+                AF_INET6 => {
+                    let addr = self.row.DestinationPrefix.Prefix.Ipv6.sin6_addr.u.Byte;
+                    IpAddr::V6(Ipv6Addr::from(addr))
+                }
+                // TODO: Is this reachable?
+                _ => unreachable!("invalid address family"),
+            }
+        };
+        (dest, self.prefix_length())
+    }
+
+    /// Get the prefix length for this route
+    fn prefix_length(&self) -> u8 {
+        self.row.DestinationPrefix.PrefixLength
+    }
+
+    /// Get the next hop address for this route
+    ///
+    /// Return `None` if the address family is not recognized.
+    pub fn next_hop(&self) -> IpAddr {
+        // SAFETY: The union is valid
+        unsafe {
+            match self.row.NextHop.si_family {
+                AF_INET => {
+                    let addr = self.row.NextHop.Ipv4.sin_addr.S_un.S_addr;
+                    IpAddr::V4(Ipv4Addr::from(u32::from_be(addr)))
+                }
+                AF_INET6 => {
+                    let addr = self.row.NextHop.Ipv6.sin6_addr.u.Byte;
+                    IpAddr::V6(Ipv6Addr::from(addr))
+                }
+                // TODO: Is this reachable?
+                _ => unreachable!("invalid address family"),
+            }
+        }
+    }
+
+    /// Get the interface index for this route
+    pub fn interface_index(&self) -> u32 {
+        self.row.InterfaceIndex
+    }
+
+    /// Get the interface LUID for this route
+    pub fn interface_luid(&self) -> Luid {
+        Luid::from(self.row.InterfaceLuid)
+    }
+
+    /// Get the route metric
+    pub fn metric(&self) -> u32 {
+        self.row.Metric
+    }
+
+    /// Get whether this is an immortal route
+    pub fn immortal(&self) -> bool {
+        self.row.Immortal
+    }
+
+    /// Get the age of the route in seconds
+    pub fn age(&self) -> u32 {
+        self.row.Age
+    }
+
+    /// Get the raw route row structure
+    pub fn as_raw(&self) -> &MIB_IPFORWARD_ROW2 {
+        &self.row
+    }
+}
+
+impl<'a> From<&'a MIB_IPFORWARD_ROW2> for &'a RouteRow {
+    fn from(raw: &'a MIB_IPFORWARD_ROW2) -> Self {
+        RouteRow::new(raw)
+    }
+}
+
+impl AsRef<MIB_IPFORWARD_ROW2> for RouteRow {
+    fn as_ref(&self) -> &MIB_IPFORWARD_ROW2 {
+        &self.row
+    }
+}
+
 /// Notification type for change callbacks
 ///
 /// Corresponds to `MIB_NOTIFICATION_TYPE` in the Windows API.
@@ -663,6 +774,87 @@ unsafe extern "system" fn notify_callback<'a, UnderlyingType: 'a, WrappedType: '
         }
         other => unreachable!("invalid notification type: {other}"),
     }
+}
+
+/// Registers a callback function that is invoked when a route is added, removed, or changed.
+///
+/// On success, this returns a notification handle. The callback is unregistered and monitoring
+/// stops when the handle is dropped.
+///
+/// This uses the [`NotifyRouteChange2`] Windows API function.
+///
+/// # Arguments
+///
+/// - `family`: The address family to monitor. If `None`, all address families are monitored.
+/// - `callback`: The callback function to invoke when a route change occurs.
+/// - `initial_notification`: Whether to immediately invoke the callback to confirm
+///   registration of callback.
+///
+/// # Example
+///
+/// ```no_run
+/// use dos::net::{notify_route_change, NotificationType};
+/// use std::{thread, time::Duration};
+///
+/// // Register for route change notifications
+/// let _handle = notify_route_change(
+///     None, // Monitor all address families
+///     |notification_type| {
+///         match notification_type {
+///             NotificationType::InitialNotification => {
+///                 println!("Route monitoring started");
+///             }
+///             NotificationType::AddInstance(route) => {
+///                 println!("Route added: {:?} -> {:?}",
+///                          route.destination_prefix(), route.next_hop());
+///             }
+///             NotificationType::DeleteInstance(route) => {
+///                 println!("Route removed: {:?}", route.destination_prefix());
+///             }
+///             NotificationType::ParameterNotification(route) => {
+///                 println!("Route changed: {:?} (metric: {})",
+///                          route.destination_prefix(), route.metric());
+///             }
+///         }
+///     },
+///     true, // Request initial notification
+/// )?;
+///
+/// // Keep the handle alive to continue monitoring
+/// thread::sleep(Duration::from_secs(60));
+/// # Ok::<(), std::io::Error>(())
+/// ```
+///
+/// # Safety
+///
+/// The callback must be Send, as it may be called from another thread.
+///
+/// [`NotifyRouteChange2`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyroutechange2
+pub fn notify_route_change(
+    family: Option<AddressFamily>,
+    callback: impl NotificationCb<RouteRow> + 'static,
+    initial_notification: bool,
+) -> io::Result<Box<NotifyCallbackHandle<RouteRow>>> {
+    let mut context = Box::new(NotifyCallbackHandle {
+        callback: Mutex::new(Box::new(callback)),
+        handle: ptr::null_mut(),
+    });
+
+    let status = unsafe {
+        NotifyRouteChange2(
+            family.map(|f| f as u16).unwrap_or(AF_UNSPEC),
+            Some(notify_callback::<MIB_IPFORWARD_ROW2, RouteRow>),
+            &mut *context.as_mut() as *mut _ as *mut _,
+            initial_notification,
+            (&mut context.handle) as *mut _,
+        )
+    };
+
+    if status != ERROR_SUCCESS {
+        return Err(io::Error::from_raw_os_error(status as i32));
+    }
+
+    Ok(context)
 }
 
 /// Return the network interface index given its [Luid].
