@@ -36,12 +36,12 @@ use windows_sys::Win32::{
             GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_INCLUDE_PREFIX,
             GAA_FLAG_INCLUDE_TUNNEL_BINDINGORDER, GAA_FLAG_INCLUDE_WINS_INFO,
             GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST,
-            GetAdaptersAddresses, GetIpForwardEntry2, GetIpInterfaceEntry,
+            GetAdaptersAddresses, GetIpForwardEntry2, GetIpForwardTable2, GetIpInterfaceEntry,
             GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH, IP_ADDRESS_PREFIX,
-            MIB_IPFORWARD_ROW2, MIB_IPINTERFACE_ROW, MIB_UNICASTIPADDRESS_ROW,
-            MIB_UNICASTIPADDRESS_TABLE, MibAddInstance, MibDeleteInstance, MibInitialNotification,
-            MibParameterNotification, NotifyIpInterfaceChange, NotifyRouteChange2,
-            SetIpInterfaceEntry,
+            MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPINTERFACE_ROW,
+            MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, MibAddInstance,
+            MibDeleteInstance, MibInitialNotification, MibParameterNotification,
+            NotifyIpInterfaceChange, NotifyRouteChange2, SetIpInterfaceEntry,
         },
         Ndis::{IF_MAX_STRING_SIZE, NET_LUID_LH},
     },
@@ -192,16 +192,64 @@ pub fn get_unicast_ip_address_table(
 
     // SAFETY: table is valid and points to a MIB_UNICASTIPADDRESS_TABLE
     let num_entries = usize::try_from(unsafe { (*table).NumEntries }).unwrap();
-    let mut entries = Vec::with_capacity(num_entries);
 
-    for i in 0..num_entries {
-        // SAFETY: We've verified the index is within bounds
-        let raw_entry = unsafe {
-            let entries_ptr = (*table).Table.as_ptr();
-            *entries_ptr.add(i)
-        };
-        entries.push(UnicastIpAddressRow { raw_entry });
+    // SAFETY: table is valid for `num_entries` entries
+    let entries = unsafe { std::slice::from_raw_parts((*table).Table.as_ptr(), num_entries) }
+        .iter()
+        .map(|&raw_entry| UnicastIpAddressRow { raw_entry })
+        .collect();
+
+    // SAFETY: All entries are plain old data, and we have copied them
+    unsafe {
+        FreeMibTable(table as *mut _);
     }
+
+    Ok(entries)
+}
+
+/// Retrieve the IP forward table for a specific address family
+///
+/// If `family` is `None` (AF_UNSPEC), all address families will be retrieved.
+///
+/// This uses the [`GetIpForwardTable2`] Windows API function.
+///
+/// # Example
+///
+/// ```no_run
+/// use dos::net::get_ip_forward_table;
+///
+/// // Get all routes in the system
+/// for route in get_ip_forward_table(None)? {
+///     let (dest, prefix_len) = route.destination_prefix();
+///     println!("Route: {}/{} -> {} (metric: {})",
+///              dest, prefix_len, route.next_hop(), route.metric());
+/// }
+/// # Ok::<(), std::io::Error>(())
+/// ```
+///
+/// [`GetIpForwardTable2`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipforwardtable2
+pub fn get_ip_forward_table(family: Option<AddressFamily>) -> io::Result<Vec<RouteRow>> {
+    let mut table: *mut MIB_IPFORWARD_TABLE2 = ptr::null_mut();
+
+    let family = family.map(|f| f as u16).unwrap_or(AF_UNSPEC);
+
+    // SAFETY: `table` is valid to be written to
+    let result = unsafe { GetIpForwardTable2(family, &mut table) };
+
+    if result != NO_ERROR {
+        return Err(io::Error::from_raw_os_error(result as i32));
+    }
+
+    debug_assert_ne!(table, ptr::null_mut());
+
+    // SAFETY: table is valid and points to a MIB_IPFORWARD_TABLE2
+    let num_entries = usize::try_from(unsafe { (*table).NumEntries }).unwrap();
+
+    // SAFETY: table is valid for `num_entries` entries
+    let entries = unsafe { std::slice::from_raw_parts((*table).Table.as_ptr(), num_entries) }
+        .iter()
+        .map(|&row| RouteRow { row })
+        .collect();
 
     // SAFETY: All entries are plain old data, and we have copied them
     unsafe {
