@@ -37,10 +37,11 @@ use windows_sys::Win32::{
             GAA_FLAG_INCLUDE_TUNNEL_BINDINGORDER, GAA_FLAG_INCLUDE_WINS_INFO,
             GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST,
             GetAdaptersAddresses, GetIpForwardEntry2, GetIpInterfaceEntry,
-            GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH, MIB_IPFORWARD_ROW2,
-            MIB_IPINTERFACE_ROW, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE,
-            MibAddInstance, MibDeleteInstance, MibInitialNotification, MibParameterNotification,
-            NotifyIpInterfaceChange, NotifyRouteChange2, SetIpInterfaceEntry,
+            GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH, IP_ADDRESS_PREFIX,
+            MIB_IPFORWARD_ROW2, MIB_IPINTERFACE_ROW, MIB_UNICASTIPADDRESS_ROW,
+            MIB_UNICASTIPADDRESS_TABLE, MibAddInstance, MibDeleteInstance, MibInitialNotification,
+            MibParameterNotification, NotifyIpInterfaceChange, NotifyRouteChange2,
+            SetIpInterfaceEntry,
         },
         Ndis::{IF_MAX_STRING_SIZE, NET_LUID_LH},
     },
@@ -579,14 +580,14 @@ impl RouteRow {
     ) -> io::Result<Self> {
         let interface_luid = interface_luid.into();
 
-        Self::get_inner(|| {
-            let mut row = MIB_IPFORWARD_ROW2::default();
-            row.InterfaceLuid = NET_LUID_LH::from(interface_luid);
-            row.DestinationPrefix.PrefixLength = destination_prefix.1;
-            row.DestinationPrefix.Prefix = Self::prefix_from_ip(destination_prefix.0);
-            row.NextHop = Self::prefix_from_ip(next_hop);
-
-            row
+        Self::get_inner(|| MIB_IPFORWARD_ROW2 {
+            InterfaceLuid: NET_LUID_LH::from(interface_luid),
+            DestinationPrefix: IP_ADDRESS_PREFIX {
+                Prefix: Self::prefix_from_ip(destination_prefix.0),
+                PrefixLength: destination_prefix.1,
+            },
+            NextHop: Self::prefix_from_ip(next_hop),
+            ..Default::default()
         })
     }
 
@@ -600,14 +601,14 @@ impl RouteRow {
         interface_index: u32,
         next_hop: IpAddr,
     ) -> io::Result<Self> {
-        Self::get_inner(|| {
-            let mut row = MIB_IPFORWARD_ROW2::default();
-            row.InterfaceIndex = interface_index;
-            row.DestinationPrefix.PrefixLength = destination_prefix.1;
-            row.DestinationPrefix.Prefix = Self::prefix_from_ip(destination_prefix.0);
-            row.NextHop = Self::prefix_from_ip(next_hop);
-
-            row
+        Self::get_inner(|| MIB_IPFORWARD_ROW2 {
+            InterfaceIndex: interface_index,
+            DestinationPrefix: IP_ADDRESS_PREFIX {
+                Prefix: Self::prefix_from_ip(destination_prefix.0),
+                PrefixLength: destination_prefix.1,
+            },
+            NextHop: Self::prefix_from_ip(next_hop),
+            ..Default::default()
         })
     }
 
@@ -615,7 +616,7 @@ impl RouteRow {
         let mut addr = SOCKADDR_INET::default();
         match ip {
             IpAddr::V4(ipv4) => {
-                addr.si_family = AF_INET as u16;
+                addr.si_family = AF_INET;
                 addr.Ipv4.sin_addr.S_un.S_addr = u32::from_be_bytes(ipv4.octets());
             }
             IpAddr::V6(ipv6) => {
