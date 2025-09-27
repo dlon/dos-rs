@@ -121,4 +121,4 @@ is no guarantee of that.
 
 Contributions are welcome! Please open an issue or a pull request.
 
-License: GPL-3.0-only
+License: MIT
