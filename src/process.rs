@@ -80,6 +80,8 @@ pub fn create_toolhelp32_snapshot(
 
 /// A snapshot of process modules and heaps.
 ///
+/// See [create_toolhelp32_snapshot].
+///
 /// This uses the [`CreateToolhelp32Snapshot`] Windows API function.
 ///
 /// [`CreateToolhelp32Snapshot`]: https://learn.microsoft.com/en-us/windows/win32/api/tlhelp32/nf-tlhelp32-createtoolhelp32snapshot
