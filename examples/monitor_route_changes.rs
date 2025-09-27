@@ -27,7 +27,8 @@ fn main() -> io::Result<()> {
                 NotificationType::AddInstance(row) => {
                     // Fill in more details
                     let dest = row.destination_prefix();
-                    let updated = get_ip_forward_entry(row.interface_luid(), dest.0, dest.1);
+                    let next_hop = row.next_hop();
+                    let updated = get_ip_forward_entry(row.interface_luid(), dest, next_hop);
                     let row = updated.as_ref().unwrap_or(row);
                     println!(
                         "[ADD] Route added - LUID: {:#x}, Destination: {:?}, Metric: {}",
@@ -39,7 +40,8 @@ fn main() -> io::Result<()> {
                 NotificationType::DeleteInstance(row) => {
                     // Fill in more details
                     let dest = row.destination_prefix();
-                    let updated = get_ip_forward_entry(row.interface_luid(), dest.0, dest.1);
+                    let next_hop = row.next_hop();
+                    let updated = get_ip_forward_entry(row.interface_luid(), dest, next_hop);
                     let row = updated.as_ref().unwrap_or(row);
                     println!(
                         "[DELETE] Route removed - LUID: {:#x}, Destination: {:?}",
@@ -50,7 +52,8 @@ fn main() -> io::Result<()> {
                 NotificationType::ParameterNotification(row) => {
                     // Fill in more details
                     let dest = row.destination_prefix();
-                    let updated = get_ip_forward_entry(row.interface_luid(), dest.0, dest.1);
+                    let next_hop = row.next_hop();
+                    let updated = get_ip_forward_entry(row.interface_luid(), dest, next_hop);
                     let row = updated.as_ref().unwrap_or(row);
                     println!(
                         "[DELETE] Route changed - LUID: {:#x}, Destination: {:?}",

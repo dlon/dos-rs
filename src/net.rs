@@ -327,8 +327,8 @@ pub fn set_ip_interface_entry(interface: impl AsRef<MIB_IPINTERFACE_ROW>) -> io:
 /// # Arguments
 ///
 /// * `interface` - The interface identifier (LUID or index)
-/// * `destination` - The destination prefix IP address
-/// * `prefix_length` - The destination prefix length
+/// * `destination_prefix` - The destination prefix IP address and length
+/// * `next_hop` - The next hop IP address
 ///
 /// # Example
 ///
@@ -338,9 +338,9 @@ pub fn set_ip_interface_entry(interface: impl AsRef<MIB_IPINTERFACE_ROW>) -> io:
 ///
 /// // Get the default route (0.0.0.0/0) on interface index 1
 /// let route = get_ip_forward_entry(
-///     InterfaceIdentifier::InterfaceIndex(1)
+///     InterfaceIdentifier::Index(1),
+///     (Ipv4Addr::UNSPECIFIED.into(), 0),
 ///     Ipv4Addr::UNSPECIFIED.into(),
-///     0,
 /// )?;
 ///
 /// println!("Route metric: {}", route.metric());
@@ -351,15 +351,15 @@ pub fn set_ip_interface_entry(interface: impl AsRef<MIB_IPINTERFACE_ROW>) -> io:
 /// [`GetIpForwardEntry2`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipforwardentry2
 pub fn get_ip_forward_entry(
     interface: impl Into<InterfaceIdentifier>,
-    destination: IpAddr,
-    prefix_length: u8,
+    destination_prefix: (IpAddr, u8),
+    next_hop: IpAddr,
 ) -> io::Result<RouteRow> {
     match interface.into() {
         InterfaceIdentifier::Luid(luid) => {
-            RouteRow::get_by_destination_and_interface(destination, prefix_length, luid)
+            RouteRow::get_by_destination_and_interface(destination_prefix, luid, next_hop)
         }
         InterfaceIdentifier::Index(index) => {
-            RouteRow::get_by_destination_and_index(destination, prefix_length, index)
+            RouteRow::get_by_destination_and_index(destination_prefix, index, next_hop)
         }
     }
 }
@@ -573,17 +573,18 @@ impl RouteRow {
     ///
     /// [`GetIpForwardEntry2`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipforwardentry2
     fn get_by_destination_and_interface(
-        destination: IpAddr,
-        prefix_length: u8,
+        destination_prefix: (IpAddr, u8),
         interface_luid: impl Into<Luid>,
+        next_hop: IpAddr,
     ) -> io::Result<Self> {
         let interface_luid = interface_luid.into();
 
         Self::get_inner(|| {
             let mut row = MIB_IPFORWARD_ROW2::default();
             row.InterfaceLuid = NET_LUID_LH::from(interface_luid);
-            row.DestinationPrefix.PrefixLength = prefix_length;
-            row.DestinationPrefix.Prefix = Self::prefix_from_ip(destination);
+            row.DestinationPrefix.PrefixLength = destination_prefix.1;
+            row.DestinationPrefix.Prefix = Self::prefix_from_ip(destination_prefix.0);
+            row.NextHop = Self::prefix_from_ip(next_hop);
 
             row
         })
@@ -595,15 +596,16 @@ impl RouteRow {
     ///
     /// [`GetIpForwardEntry2`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipforwardentry2
     fn get_by_destination_and_index(
-        destination: IpAddr,
-        prefix_length: u8,
+        destination_prefix: (IpAddr, u8),
         interface_index: u32,
+        next_hop: IpAddr,
     ) -> io::Result<Self> {
         Self::get_inner(|| {
             let mut row = MIB_IPFORWARD_ROW2::default();
             row.InterfaceIndex = interface_index;
-            row.DestinationPrefix.PrefixLength = prefix_length;
-            row.DestinationPrefix.Prefix = Self::prefix_from_ip(destination);
+            row.DestinationPrefix.PrefixLength = destination_prefix.1;
+            row.DestinationPrefix.Prefix = Self::prefix_from_ip(destination_prefix.0);
+            row.NextHop = Self::prefix_from_ip(next_hop);
 
             row
         })
