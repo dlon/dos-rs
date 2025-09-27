@@ -36,15 +36,15 @@ use windows_sys::Win32::{
             GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_INCLUDE_PREFIX,
             GAA_FLAG_INCLUDE_TUNNEL_BINDINGORDER, GAA_FLAG_INCLUDE_WINS_INFO,
             GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST,
-            GetAdaptersAddresses, GetIpInterfaceEntry, GetUnicastIpAddressTable,
-            IP_ADAPTER_ADDRESSES_LH, MIB_IPFORWARD_ROW2, MIB_IPINTERFACE_ROW,
-            MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, MibAddInstance,
-            MibDeleteInstance, MibInitialNotification, MibParameterNotification,
+            GetAdaptersAddresses, GetIpForwardEntry2, GetIpInterfaceEntry,
+            GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH, MIB_IPFORWARD_ROW2,
+            MIB_IPINTERFACE_ROW, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE,
+            MibAddInstance, MibDeleteInstance, MibInitialNotification, MibParameterNotification,
             NotifyIpInterfaceChange, NotifyRouteChange2, SetIpInterfaceEntry,
         },
         Ndis::{IF_MAX_STRING_SIZE, NET_LUID_LH},
     },
-    Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC},
+    Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_INET},
 };
 use windows_sys::core::GUID;
 
@@ -280,6 +280,12 @@ pub enum InterfaceIdentifier {
     Index(u32),
 }
 
+impl<T: Into<Luid>> From<T> for InterfaceIdentifier {
+    fn from(luid: T) -> Self {
+        InterfaceIdentifier::Luid(luid.into())
+    }
+}
+
 /// Get an interface entry by LUID and address family.
 ///
 /// This uses the [`GetIpInterfaceEntry`] Windows API function.
@@ -314,9 +320,47 @@ pub fn set_ip_interface_entry(interface: impl AsRef<MIB_IPINTERFACE_ROW>) -> io:
     Ok(())
 }
 
-impl<T: Into<Luid>> From<T> for InterfaceIdentifier {
-    fn from(luid: T) -> Self {
-        InterfaceIdentifier::Luid(luid.into())
+/// Get a route entry by destination prefix and interface.
+///
+/// This uses the [`GetIpForwardEntry2`] Windows API function.
+///
+/// # Arguments
+///
+/// * `interface` - The interface identifier (LUID or index)
+/// * `destination` - The destination prefix IP address
+/// * `prefix_length` - The destination prefix length
+///
+/// # Example
+///
+/// ```no_run
+/// use dos::net::{get_ip_forward_entry, InterfaceIdentifier};
+/// use std::net::Ipv4Addr;
+///
+/// // Get the default route (0.0.0.0/0) on interface index 1
+/// let route = get_ip_forward_entry(
+///     InterfaceIdentifier::InterfaceIndex(1)
+///     Ipv4Addr::UNSPECIFIED.into(),
+///     0,
+/// )?;
+///
+/// println!("Route metric: {}", route.metric());
+/// println!("Next hop: {}", route.next_hop());
+/// # Ok::<(), std::io::Error>(())
+/// ```
+///
+/// [`GetIpForwardEntry2`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipforwardentry2
+pub fn get_ip_forward_entry(
+    interface: impl Into<InterfaceIdentifier>,
+    destination: IpAddr,
+    prefix_length: u8,
+) -> io::Result<RouteRow> {
+    match interface.into() {
+        InterfaceIdentifier::Luid(luid) => {
+            RouteRow::get_by_destination_and_interface(destination, prefix_length, luid)
+        }
+        InterfaceIdentifier::Index(index) => {
+            RouteRow::get_by_destination_and_index(destination, prefix_length, index)
+        }
     }
 }
 
@@ -521,6 +565,75 @@ impl RouteRow {
         // SAFETY: row is a valid row, and we preserve its lifetime
         // Since `RouteRow` is transparent, we may simply cast it
         unsafe { &*(pprows.cast()) }
+    }
+
+    /// Get a route entry by destination prefix and interface.
+    ///
+    /// This uses the [`GetIpForwardEntry2`] Windows API function.
+    ///
+    /// [`GetIpForwardEntry2`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipforwardentry2
+    fn get_by_destination_and_interface(
+        destination: IpAddr,
+        prefix_length: u8,
+        interface_luid: impl Into<Luid>,
+    ) -> io::Result<Self> {
+        let interface_luid = interface_luid.into();
+
+        Self::get_inner(|| {
+            let mut row = MIB_IPFORWARD_ROW2::default();
+            row.InterfaceLuid = NET_LUID_LH::from(interface_luid);
+            row.DestinationPrefix.PrefixLength = prefix_length;
+            row.DestinationPrefix.Prefix = Self::prefix_from_ip(destination);
+
+            row
+        })
+    }
+
+    /// Get a route entry by destination prefix and interface index.
+    ///
+    /// This uses the [`GetIpForwardEntry2`] Windows API function.
+    ///
+    /// [`GetIpForwardEntry2`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipforwardentry2
+    fn get_by_destination_and_index(
+        destination: IpAddr,
+        prefix_length: u8,
+        interface_index: u32,
+    ) -> io::Result<Self> {
+        Self::get_inner(|| {
+            let mut row = MIB_IPFORWARD_ROW2::default();
+            row.InterfaceIndex = interface_index;
+            row.DestinationPrefix.PrefixLength = prefix_length;
+            row.DestinationPrefix.Prefix = Self::prefix_from_ip(destination);
+
+            row
+        })
+    }
+
+    fn prefix_from_ip(ip: IpAddr) -> SOCKADDR_INET {
+        let mut addr = SOCKADDR_INET::default();
+        match ip {
+            IpAddr::V4(ipv4) => {
+                addr.si_family = AF_INET as u16;
+                addr.Ipv4.sin_addr.S_un.S_addr = u32::from_be_bytes(ipv4.octets());
+            }
+            IpAddr::V6(ipv6) => {
+                addr.si_family = AF_INET6;
+                addr.Ipv6.sin6_addr.u.Byte = ipv6.octets();
+            }
+        }
+        addr
+    }
+
+    fn get_inner(make_row: impl FnOnce() -> MIB_IPFORWARD_ROW2) -> io::Result<Self> {
+        let mut row = make_row();
+
+        // SAFETY: `row` is initialized
+        let status = unsafe { GetIpForwardEntry2(&mut row) };
+        if status != 0 {
+            return Err(io::Error::from_raw_os_error(status as i32));
+        }
+
+        Ok(RouteRow { row })
     }
 
     /// Get the destination prefix for this route, as (address, prefix length)
