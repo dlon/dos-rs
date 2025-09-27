@@ -7,12 +7,7 @@ the standard library does not.
 
 ## Quick start
 
-Add this to your `Cargo.toml`:
-
-```toml
-[dependencies]
-dos = "0.0.1"
-```
+Add this to your `Cargo.toml`: `cargo add dos`
 
 ## Features
 
