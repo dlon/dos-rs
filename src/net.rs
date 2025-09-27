@@ -805,10 +805,6 @@ impl<T, F: FnMut(NotificationType<'_, T>) + Send> NotificationCb<T> for F {}
 /// # Ok::<(), std::io::Error>(())
 /// ```
 ///
-/// # Safety
-///
-/// The callback must be Send, as it may be called from another thread.
-///
 /// [`NotifyIpInterfaceChange`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyipinterfacechange
 pub fn notify_ip_interface_change(
     family: Option<AddressFamily>,
@@ -820,6 +816,7 @@ pub fn notify_ip_interface_change(
         handle: ptr::null_mut(),
     });
 
+    // SAFETY: context is valid until the callback is unregistered
     let status = unsafe {
         NotifyIpInterfaceChange(
             family.map(|f| f as u16).unwrap_or(AF_UNSPEC),
@@ -941,10 +938,6 @@ unsafe extern "system" fn notify_callback<'a, UnderlyingType: 'a, WrappedType: '
 /// # Ok::<(), std::io::Error>(())
 /// ```
 ///
-/// # Safety
-///
-/// The callback must be Send, as it may be called from another thread.
-///
 /// [`NotifyRouteChange2`]: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyroutechange2
 pub fn notify_route_change(
     family: Option<AddressFamily>,
@@ -956,6 +949,7 @@ pub fn notify_route_change(
         handle: ptr::null_mut(),
     });
 
+    // SAFETY: context is valid until the callback is unregistered
     let status = unsafe {
         NotifyRouteChange2(
             family.map(|f| f as u16).unwrap_or(AF_UNSPEC),
